@@ -54,8 +54,11 @@ not in `settings.json`. Then reconnect `plugin:fal:fal-ai` from `/mcp`.
 **B. Keep the key only in env or Bitwarden** (no second copy). Add the server at user scope with this skill's
 helper, which reads the key the same way the runtime does, and disable the plugin's copy in `/mcp`:
 ```bash
-claude mcp add-json --scope user fal-ai '{"type":"http","url":"https://mcp.fal.ai/mcp","headersHelper":"python3 <skill-dir>/scripts/mcp_headers.py"}'
+claude mcp add-json --scope user fal '{"type":"http","url":"https://mcp.fal.ai/mcp","headersHelper":"python3 ~/.claude/plugins/marketplaces/fal-skills/skills/fal-skill-creator/scripts/mcp_headers.py"}'
 ```
+That path is the plugin's marketplace copy, which stays in place across plugin updates. Without the plugin, use
+the path of your copy of this skill. For bws, `BWS_ACCESS_TOKEN` (and optionally `FAL_BWS_SECRET_ID`) must be set in
+the shell that starts Claude Code. Check with `claude mcp list`: `fal … ✔ Connected`.
 The helper refuses to run outside Claude Code's MCP connection, so it can't leak the key into a transcript. Don't
 run it by hand. (Claude Code passes environment variables to user-scope helpers, but not to plugin ones.)
 

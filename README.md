@@ -37,36 +37,76 @@ fixes that with a small amount of structure:
 
 ## Install
 
-```bash
-# any agent, via the skills CLI
-npx skills add inovue/fal-skills
+You need a fal account and an API key (https://fal.ai/dashboard/keys), plus
+[uv](https://docs.astral.sh/uv/) (`curl -LsSf https://astral.sh/uv/install.sh | sh`). The skill's Python
+dependencies install automatically on first run.
 
-# Claude Code plugin marketplace
+### Claude Code (recommended)
+
+**1. Install the plugin.** It contains the skill and the fal MCP server.
+
+```
 /plugin marketplace add inovue/fal-skills
 /plugin install fal@fal-skills
 ```
 
-Or copy `skills/fal-skill-creator` into `~/.claude/skills/` (or your agent's skills directory).
-
-The Claude Code plugin also connects the official [fal MCP server](https://fal.ai/docs/documentation/setting-up/mcp)
-for model discovery. Enter your fal API key when the plugin asks (or later in `/plugin` → fal → Configure options);
-it is kept in the OS credential store. Generation always goes through the skill's runtime, so the cost guard and
-manifests apply. Other agents can add the server by
-hand ([auth.md](skills/fal-skill-creator/references/auth.md)); the skill works without it.
-
-**Requirements:** Python 3.10+ and [uv](https://docs.astral.sh/uv/). With uv, dependencies install automatically on
-first run. pip also works.
-
-## Set up your key
+**2. Give the skill your key.** The skill reads `FAL_KEY` from the environment Claude Code was started in:
 
 ```bash
-export FAL_KEY="…"                     # from https://fal.ai/dashboard/keys
-# or keep it in Bitwarden Secrets Manager:
-export BWS_ACCESS_TOKEN="…"            # the runtime reads the secret named FAL_KEY via `bws`
+export FAL_KEY="…"          # in your shell profile, or a gitignored .envrc
 ```
 
-Then ask your agent to "run fal doctor", or run it yourself:
-`uv run skills/fal-skill-creator/scripts/fal.py doctor`. See [auth.md](skills/fal-skill-creator/references/auth.md).
+Using Bitwarden Secrets Manager instead? Skip `FAL_KEY`: see [Bitwarden users](#bitwarden-users) below.
+
+**3. Connect the fal MCP server** (optional, for model recommendations). When the plugin asks for a
+"fal API key", paste your key; it goes to the OS credential store, not to `settings.json`. You can also set it
+later in `/plugin` → Installed → fal → Configure options. Then check `plugin:fal:fal-ai` in `/mcp`.
+Bitwarden users: leave it empty and follow the section below.
+
+**4. Check.** Restart Claude Code (or run `/reload-plugins`) and ask: *"run fal doctor"*. It shows where the key
+was found (never the key itself), whether fal accepts it, and where outputs go.
+
+### Other agents (Codex, Cursor, …)
+
+```bash
+npx skills add inovue/fal-skills
+```
+
+Or copy `skills/fal-skill-creator` into your agent's skills directory. Set `FAL_KEY` (or Bitwarden, below) as in
+step 2. The fal MCP server is optional: add `https://mcp.fal.ai/mcp` with an `Authorization: Bearer <key>` header
+in your client's MCP settings ([auth.md](skills/fal-skill-creator/references/auth.md)).
+
+### Bitwarden users
+
+If you keep secrets in [Bitwarden Secrets Manager](https://bitwarden.com/products/secrets-manager/), the key never
+needs to leave it:
+
+```bash
+bws secret create FAL_KEY "<your fal key>" <project_id>    # once
+export BWS_ACCESS_TOKEN="…"      # must be set in the shell that starts Claude Code
+export FAL_BWS_SECRET_ID="…"     # optional: the secret's id, a faster lookup (needed if two secrets are named FAL_KEY)
+```
+
+The skill finds the secret named `FAL_KEY` through the `bws` CLI; `fal doctor` should report
+`fal key: bws secret 'FAL_KEY'`.
+
+The plugin's MCP server can't use bws: Claude Code hides credential variables such as `BWS_ACCESS_TOKEN` from
+plugins. Instead, add the server at user scope with the bundled helper, which reads the key from bws each time it
+connects:
+
+```bash
+claude mcp add-json --scope user fal '{"type":"http","url":"https://mcp.fal.ai/mcp","headersHelper":"python3 ~/.claude/plugins/marketplaces/fal-skills/skills/fal-skill-creator/scripts/mcp_headers.py"}'
+```
+
+Then, in `/mcp`, disable `plugin:fal:fal-ai` (it has no key and would keep failing), and check that `fal` shows as
+connected. The helper path points at the plugin's marketplace copy, so it keeps working when the plugin updates.
+
+### Update or remove
+
+```
+/plugin marketplace update fal-skills     # then /plugin → fal → Update now, and restart
+/plugin uninstall fal@fal-skills          # plus `claude mcp remove --scope user fal` if you added it
+```
 
 ## Use it
 

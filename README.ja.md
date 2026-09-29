@@ -23,18 +23,63 @@
 
 ## インストール
 
-```bash
-npx skills add inovue/fal-skills
-# Claude Code プラグインとして（fal MCP サーバーも自動で接続されます）
+必要なもの：fal のアカウントと API キー（https://fal.ai/dashboard/keys ）、[uv](https://docs.astral.sh/uv/)（`curl -LsSf https://astral.sh/uv/install.sh | sh`）。Python の依存パッケージは初回実行時に自動で入ります。
+
+### Claude Code（おすすめ）
+
+**1. plugin を入れる**（skill と fal MCP サーバーが入っています）
+
+```
 /plugin marketplace add inovue/fal-skills
 /plugin install fal@fal-skills
 ```
 
-## キーの設定
+**2. skill にキーを渡す**。skill は、Claude Code を起動したシェルの環境変数 `FAL_KEY` を読みます。
 
-`FAL_KEY` 環境変数を使うか、Bitwarden Secrets Manager を使います。後者は `BWS_ACCESS_TOKEN` を設定し、名前が `FAL_KEY` のシークレットを置いてください（`FAL_BWS_SECRET_ID` で ID を直接指定することもできます）。キーを表示したり、コマンドライン引数やディスクに出したりすることはありません。
+```bash
+export FAL_KEY="…"          # シェルの設定ファイル、または gitignore した .envrc に
+```
 
-同梱の fal MCP サーバーを使うには、plugin を有効にするときに聞かれる欄（後からなら `/plugin` → fal → Configure options）に fal の API キーを入れてください。キーは OS の安全な保管場所に保存されます。fal は Claude Code 向けの OAuth サインインを提供していないため、キーが必要です。キーを環境変数や Bitwarden だけに置きたい場合の設定方法は `references/auth.md` にあります。MCP は「探す」ためだけに使い、生成は必ずこの skill の `fal run` で行います（費用チェックと保存のため）。
+Bitwarden Secrets Manager を使っている場合は `FAL_KEY` は不要です。下の「[Bitwarden を使っている場合](#bitwarden-を使っている場合)」を見てください。
+
+**3. fal MCP サーバーをつなぐ**（任意。モデルのおすすめ機能に使います）。plugin が「fal API key」を聞いてきたら貼り付けてください。キーは `settings.json` ではなく OS の安全な保管場所に保存されます。後からでも `/plugin` → Installed → fal → Configure options で設定できます。設定したら `/mcp` で `plugin:fal:fal-ai` が接続済みか確認します。Bitwarden を使っている場合は空欄のままにして、下の手順に進んでください。
+
+**4. 確認する**。Claude Code を再起動（または `/reload-plugins`）して「fal doctor を実行して」と頼みます。キーがどこで見つかったか（キー自体は表示しません）、fal がキーを受け付けるか、出力先はどこかが表示されます。
+
+### ほかのエージェント（Codex、Cursor など）
+
+```bash
+npx skills add inovue/fal-skills
+```
+
+または `skills/fal-skill-creator` をエージェントの skills フォルダーにコピーします。キーは手順 2（または下の Bitwarden）と同じように設定します。fal MCP サーバーは任意です。使う場合は、クライアントの MCP 設定に `https://mcp.fal.ai/mcp` と `Authorization: Bearer <キー>` ヘッダーを追加してください（[auth.md](skills/fal-skill-creator/references/auth.md)）。
+
+### Bitwarden を使っている場合
+
+[Bitwarden Secrets Manager](https://bitwarden.com/products/secrets-manager/) で秘密情報を管理していれば、キーを Bitwarden の外に出す必要はありません。
+
+```bash
+bws secret create FAL_KEY "<fal のキー>" <project_id>    # 最初に1回だけ
+export BWS_ACCESS_TOKEN="…"      # Claude Code を起動するシェルに設定しておく
+export FAL_BWS_SECRET_ID="…"     # 任意：シークレットの ID。検索が速くなる（FAL_KEY という名前が2つある場合は必須）
+```
+
+skill は `bws` CLI で `FAL_KEY` という名前のシークレットを探します。`fal doctor` で `fal key: bws secret 'FAL_KEY'` と出れば OK です。
+
+plugin 側の MCP サーバーは bws を使えません。Claude Code が `BWS_ACCESS_TOKEN` などの秘密情報の環境変数を plugin から見えなくしているためです。代わりに、同梱のヘルパーを使ってユーザー単位でサーバーを追加してください。ヘルパーは接続のたびに bws からキーを読みます。
+
+```bash
+claude mcp add-json --scope user fal '{"type":"http","url":"https://mcp.fal.ai/mcp","headersHelper":"python3 ~/.claude/plugins/marketplaces/fal-skills/skills/fal-skill-creator/scripts/mcp_headers.py"}'
+```
+
+そのあと `/mcp` で `plugin:fal:fal-ai` を Disable にし（キーがないので失敗し続けるため）、`fal` が接続済みになっていることを確認します。ヘルパーのパスは plugin の marketplace のコピーを指しているので、plugin を更新しても動き続けます。
+
+### 更新・削除
+
+```
+/plugin marketplace update fal-skills     # そのあと /plugin → fal → Update now を選び、再起動
+/plugin uninstall fal@fal-skills          # ユーザー単位のサーバーを追加した場合は claude mcp remove --scope user fal も
+```
 
 ## 使い方の例
 
