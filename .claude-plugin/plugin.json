@@ -1,0 +1,10 @@
+{
+  "name": "fal",
+  "version": "1.0.0",
+  "description": "Turn any fal.ai model into a reliable generator: newest-first model search, schema-validated profiles, researched prompt templates, cost guard, and chainable media pipelines.",
+  "author": { "name": "fal-skills contributors" },
+  "homepage": "https://github.com/OWNER/fal-skills",
+  "repository": "https://github.com/OWNER/fal-skills",
+  "license": "MIT",
+  "keywords": ["fal", "fal.ai", "image-generation", "video-generation", "text-to-speech", "media", "pipelines", "skills"]
+}

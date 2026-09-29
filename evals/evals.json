@@ -1,0 +1,54 @@
+{
+  "skill_name": "fal-skill-creator",
+  "evals": [
+    {
+      "id": 1,
+      "name": "discover-and-profile-with-research",
+      "prompt": "falで最近出たtext-to-imageモデルを探して、手頃な価格のものを1つ選んでプロファイル化して。用途はブログのアイキャッチ画像(16:9)。そのモデルの推奨プロンプトの書き方も公式ドキュメントで調べてテンプレートにまとめておいて。最後にテストで1枚だけ生成して。",
+      "expected_output": "A newest-first shortlist, a chosen model with price, a profile with 16:9 defaults pinned, a researched prompting.md with templates and cited sources, and one generated image saved with a manifest.",
+      "files": [],
+      "assertions": [
+        "Presented a shortlist of recent text-to-image models ordered newest-first (with dates)",
+        "Chose a model and stated its unit price",
+        "Saved a reusable model config pinned to 16:9 (landscape_16_9 or aspect_ratio 16:9)",
+        "Wrote a prompt guide containing at least one template with {slot} placeholders",
+        "Prompt guide cites at least 2 source URLs, at least one official (fal.ai or model vendor)",
+        "Generated exactly one test image and saved it locally",
+        "Saved machine-readable run metadata (arguments/seed/url) next to the image",
+        "fal API key never appears in any output file"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "pipeline-image-to-video-cost-check",
+      "prompt": "fal-ai/flux/schnell で「朝焼けの富士山、浮世絵風」の画像を2枚作って、1枚目を fal-ai/kling-video/v2.1/standard/image-to-video で5秒の動画にしたい。動画のほうは高いので、実行前に費用を見せて確認を取って。",
+      "expected_output": "Two images generated and saved; the video step prepared with the first image wired in, its cost estimated (~$0.28) and presented for approval instead of being submitted.",
+      "files": [],
+      "assertions": [
+        "Generated two images with flux/schnell and saved both locally",
+        "Did NOT submit the image-to-video job (no video file, no kling request)",
+        "Showed a video cost estimate between $0.25 and $0.35 for 5s",
+        "Prepared the video step with the first image wired as image_url",
+        "Final message asks the user for approval before running the video",
+        "Saved machine-readable run metadata for the image run",
+        "fal API key never appears in any output file"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "export-standalone-skill",
+      "prompt": "fal-ai/flux/schnell をチームで使えるように、単体で動く skill にして ./.claude/skills に置いて。デフォルトは正方形・PNGで。",
+      "expected_output": "A self-contained skill directory under ./.claude/skills with valid SKILL.md frontmatter, bundled profile with square_hd/png defaults, and a runnable script (verified with a dry run).",
+      "files": [],
+      "assertions": [
+        "Created a skill directory under ./.claude/skills with SKILL.md",
+        "SKILL.md frontmatter is valid (name matches dir, lowercase-hyphen, description <=1024 chars)",
+        "Defaults set to square and PNG in the skill's config",
+        "Skill is self-contained (no references to paths outside its own directory)",
+        "Skill was verified to run (dry-run or a real generation)",
+        "Skill documents how to provide the fal key without embedding it",
+        "fal API key never appears in any output file"
+      ]
+    }
+  ]
+}

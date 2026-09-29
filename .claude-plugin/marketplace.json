@@ -1,0 +1,17 @@
+{
+  "name": "fal-skills",
+  "owner": { "name": "fal-skills contributors" },
+  "metadata": {
+    "description": "Agent skills for generating media with fal.ai models."
+  },
+  "plugins": [
+    {
+      "name": "fal",
+      "source": "./",
+      "description": "fal-skill-creator: search fal models newest-first, build schema-validated profiles with researched prompt templates, generate with a cost guard, and chain outputs into pipelines.",
+      "version": "1.0.0",
+      "category": "media",
+      "keywords": ["fal", "image-generation", "video-generation", "pipelines"]
+    }
+  ]
+}
