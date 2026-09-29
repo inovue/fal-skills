@@ -45,10 +45,13 @@ The job is still running on fal and will be billed whether you wait or not. Resu
 
 ## MCP server
 
-- **`plugin:fal:fal-ai` shows "Needs authentication" in `/mcp`**: expected on first use. Select it and sign in to
-  fal in the browser (OAuth). The plugin can't use your API key; see auth.md for a key-based setup at user scope.
-- **Key-based setup fails to connect**: the key was rejected (check it with `fal doctor`), or bws took longer than
-  the helper's 8 seconds (set `FAL_BWS_SECRET_ID` for a single direct lookup, or export `FAL_KEY`).
+- **`plugin:fal:fal-ai` shows as failed in `/mcp`**: the plugin has no key, or a wrong one. Set it in `/plugin` →
+  fal → Configure options, then reconnect. To keep the key only in env or Bitwarden, use the user-scope setup in
+  auth.md and disable the plugin's server.
+- **"Dynamic Client Registration rejected" / OAuth errors**: fal doesn't offer OAuth to Claude Code. Use an API
+  key as above.
+- **Helper-based setup fails to connect**: the key was rejected (check it with `fal doctor`), or bws took longer
+  than the helper's 8 seconds (set `FAL_BWS_SECRET_ID` for a single direct lookup, or export `FAL_KEY`).
 - **No MCP server at all** (another agent, or the plugin isn't installed): everything still works through
   `fal models search`, `fal models show` and `fal schema`.
 

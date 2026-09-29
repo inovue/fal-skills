@@ -305,8 +305,12 @@ def test_mcp_headers_helper():
     assert r.returncode == 0 and json.loads(r.stdout) == {}  # no key → Claude Code falls back to OAuth
 
 
-def test_plugin_manifest_mcp_server_uses_oauth():
-    # A plugin's headersHelper never sees credential env vars, so the plugin must not depend on one.
+def test_plugin_manifest_mcp_server_uses_user_config_key():
+    # fal disables OAuth dynamic client registration, and a plugin's headersHelper never sees credential env vars,
+    # so the plugin's server must get its key from a sensitive userConfig option.
     manifest = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())
     server = manifest["mcpServers"]["fal-ai"]
-    assert server == {"type": "http", "url": "https://mcp.fal.ai/mcp"}
+    assert server["url"] == "https://mcp.fal.ai/mcp" and "headersHelper" not in server
+    assert server["headers"]["Authorization"] == "Bearer ${user_config.fal_api_key}"
+    option = manifest["userConfig"]["fal_api_key"]
+    assert option["sensitive"] is True and option["required"] is False

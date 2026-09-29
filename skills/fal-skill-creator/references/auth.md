@@ -43,24 +43,27 @@ export FAL_BWS_SECRET_ID="<secret uuid>"
 
 ## The fal MCP server
 
-The Claude Code plugin connects the official fal MCP server (`https://mcp.fal.ai/mcp`) for model discovery. It
-signs in with **OAuth**: run `/mcp`, pick `plugin:fal:fal-ai`, and authenticate once in the browser. The plugin
-can't reuse your API key, because Claude Code deliberately hides credential environment variables from anything a
-plugin runs.
+The Claude Code plugin connects the official fal MCP server (`https://mcp.fal.ai/mcp`) for model discovery. It needs
+an API key: fal's sign-in server doesn't allow OAuth for Claude Code (dynamic client registration is disabled), and
+Claude Code hides credential environment variables such as `FAL_KEY` from anything a plugin runs. Pick one:
 
-To use your API key instead (for example on a headless machine), add the server yourself at user scope with this
-skill's helper. The helper reads the key the same way the runtime does, and at user scope Claude Code lets it see
-your environment:
+**A. Enter the key in the plugin's options** (simplest). Claude Code asks for it when you enable the plugin, or
+later: `/plugin` → Installed → fal → Configure options → "fal API key". It is stored in the OS credential store,
+not in `settings.json`. Then reconnect `plugin:fal:fal-ai` from `/mcp`.
+
+**B. Keep the key only in env or Bitwarden** (no second copy). Add the server at user scope with this skill's
+helper, which reads the key the same way the runtime does, and disable the plugin's copy in `/mcp`:
 ```bash
 claude mcp add-json --scope user fal-ai '{"type":"http","url":"https://mcp.fal.ai/mcp","headersHelper":"python3 <skill-dir>/scripts/mcp_headers.py"}'
 ```
 The helper refuses to run outside Claude Code's MCP connection, so it can't leak the key into a transcript. Don't
-run it by hand. If both the plugin's server and yours are present, disable one in `/mcp`.
+run it by hand. (Claude Code passes environment variables to user-scope helpers, but not to plugin ones.)
 
-Cursor, Windsurf and Codex take the same URL; use their OAuth sign-in. The skill works without the server.
+Other clients (Cursor, Windsurf, Codex) take the same URL with an `Authorization: Bearer <key>` header; prefer a
+setting that reads the key from an environment variable. The skill works without the server.
 
 ## Rotation
 
 Create a new key in the fal dashboard, update the env var or the bws secret value, run `fal doctor`, then revoke
-the old key. Nothing else stores the key. If you connected the MCP server with the helper, reconnect it from `/mcp`
-so it picks up the new key. OAuth sign-ins are separate from API keys.
+the old key. If you entered the key in the plugin's options (A above), update it there too; with the helper (B),
+just reconnect the server from `/mcp`.

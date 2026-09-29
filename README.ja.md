@@ -34,7 +34,7 @@ npx skills add inovue/fal-skills
 
 `FAL_KEY` 環境変数を使うか、Bitwarden Secrets Manager を使います。後者は `BWS_ACCESS_TOKEN` を設定し、名前が `FAL_KEY` のシークレットを置いてください（`FAL_BWS_SECRET_ID` で ID を直接指定することもできます）。キーを表示したり、コマンドライン引数やディスクに出したりすることはありません。
 
-同梱の fal MCP サーバーは、初回に `/mcp` から `plugin:fal:fal-ai` を選び、fal に OAuth でサインインすると使えます（plugin からは API キーを渡せない仕様のため）。MCP は「探す」ためだけに使い、生成は必ずこの skill の `fal run` で行います（費用チェックと保存のため）。
+同梱の fal MCP サーバーを使うには、plugin を有効にするときに聞かれる欄（後からなら `/plugin` → fal → Configure options）に fal の API キーを入れてください。キーは OS の安全な保管場所に保存されます。fal は Claude Code 向けの OAuth サインインを提供していないため、キーが必要です。キーを環境変数や Bitwarden だけに置きたい場合の設定方法は `references/auth.md` にあります。MCP は「探す」ためだけに使い、生成は必ずこの skill の `fal run` で行います（費用チェックと保存のため）。
 
 ## 使い方の例
 
