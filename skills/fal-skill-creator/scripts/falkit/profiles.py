@@ -10,8 +10,9 @@ A profile is data, not code — the runner is shared and tested once:
       presets.json   named argument bundles ({"portrait": {...}})
       prompting.md   researched prompt guide + templates for this model
 
-Lookup order: explicit path → $FAL_PROFILES_DIR → ./.fal/profiles (project)
-→ ~/.fal-skills/profiles (user). Project profiles shadow user ones.
+Lookup order: explicit path → <skill>/profiles (bundled in an exported workflow
+skill) → $FAL_PROFILES_DIR, or else ./.fal/profiles (project) → ~/.fal-skills/profiles
+(user). Earlier directories shadow later ones.
 """
 
 from __future__ import annotations
@@ -36,10 +37,17 @@ def user_dir() -> Path:
     return user_home_dir() / "profiles"
 
 
+def bundled_dir() -> Path:
+    """Profiles shipped inside an exported workflow skill (absent in fal-skill-creator itself)."""
+    return SKILL_DIR / "profiles"
+
+
 def search_dirs() -> list[Path]:
+    # A workflow skill's bundled profiles come first, so a same-named user profile can't change its behavior.
+    bundled = [bundled_dir()] if bundled_dir().is_dir() else []
     if os.environ.get("FAL_PROFILES_DIR"):
-        return [Path(os.environ["FAL_PROFILES_DIR"]).expanduser()]
-    return [project_dir(), user_dir()]
+        return bundled + [Path(os.environ["FAL_PROFILES_DIR"]).expanduser()]
+    return bundled + [project_dir(), user_dir()]
 
 
 def scope_dir(scope: str) -> Path:

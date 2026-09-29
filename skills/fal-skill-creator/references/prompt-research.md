@@ -20,7 +20,7 @@ Rank sources by authority. Only cite a lower tier when the higher tiers are sile
 | 1 | The fal model page and its API tab | `profile.json` → `playground_url`, `documentation_url` |
 | 1 | The model maker's official prompting guide (e.g. Black Forest Labs docs, Google's Veo/Imagen guides, Kling's user guide, Runway docs, ElevenLabs docs, ByteDance Seed pages, Alibaba Wan/Qwen repos) | search `"<model family> prompt guide" site:<vendor domain>` |
 | 1 | The official model card or README on GitHub or Hugging Face | search `<model name> github` / `huggingface` |
-| 2 | fal's blog and learn pages about this model or family | search `site:fal.ai <model name> prompt` / `blog.fal.ai` |
+| 2 | fal's blog and learn pages about this model or family | the fal MCP server's `search_docs`, or search `site:fal.ai <model name> prompt` / `blog.fal.ai` |
 | 2 | The description and examples in the schema (`schema.json` → `examples`, parameter descriptions) | already on disk |
 | 3 | Well-regarded community write-ups (high-signal technical posts only, not SEO listicles) | only to fill gaps; mark claims as `heuristic` |
 

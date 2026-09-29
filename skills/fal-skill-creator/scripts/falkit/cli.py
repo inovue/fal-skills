@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from . import __version__, catalog, cost, profiles, runner, schema
+from . import __version__, catalog, cost, profiles, runner, schema, workflows
 from .core import (
     EXIT_OK,
     EXIT_USAGE,
@@ -331,6 +331,111 @@ def cmd_runs_show(a: argparse.Namespace) -> Any:
     return manifest if a.json else print(json.dumps(manifest, ensure_ascii=False, indent=2))
 
 
+def cmd_runs_files(a: argparse.Namespace) -> Any:
+    _, manifest = runner.load_manifest(a.run, output_root(a.out))
+    outs = [o for o in manifest.get("outputs") or [] if not a.kind or o.get("kind") == a.kind]
+    paths = [o.get("local_path") or o.get("url") for o in outs]
+    if a.json:
+        return paths
+    print("\n".join(p for p in paths if p))
+    return None
+
+
+def cmd_ingest(a: argparse.Namespace) -> Any:
+    root = output_root(a.out)
+    root.mkdir(parents=True, exist_ok=True)
+    m = runner.ingest([Path(p) for p in a.paths], root, a.label, a.parent or [], a.note, a.move)
+    if a.json:
+        return m
+    _print_run_result(m)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# workflow
+# ---------------------------------------------------------------------------
+def cmd_workflow_init(a: argparse.Namespace) -> Any:
+    d = workflows.init(a.name, a.scope, a.example, a.force)
+    if a.json:
+        return {"path": str(d)}
+    print(f"Created workflow {a.name!r} at {d}")
+    print("next: add steps to workflow.json and instructions to WORKFLOW.md, then `fal.py workflow check`.")
+    return None
+
+
+def cmd_workflow_list(a: argparse.Namespace) -> Any:
+    items = workflows.list_all()
+    if a.json:
+        return {"workflows": items, "examples": workflows.examples()}
+    if not items:
+        print("No workflows yet. Create one with: fal.py workflow init <name> [--example NAME]")
+    for w in items:
+        print(f"{w['name']:<32} {' → '.join(w['steps'])}")
+    print(f"examples: {', '.join(workflows.examples()) or 'none'}")
+    return None
+
+
+def cmd_workflow_show(a: argparse.Namespace) -> Any:
+    wf = workflows.load(a.workflow)
+    return wf if a.json else print(json.dumps(wf, ensure_ascii=False, indent=2))
+
+
+def cmd_workflow_check(a: argparse.Namespace) -> Any:
+    res = workflows.check(a.workflow)
+    if a.json:
+        emit_json(res)
+    else:
+        print(f"{res['name']}: {'ok' if res['ok'] else 'problems found'}")
+        for e in res["errors"]:
+            print(f"  ✗ {e}")
+        for w in res["warnings"]:
+            print(f"  ! {w}")
+        c = res["cost_per_run"]
+        extra = f" + unknown ({', '.join(c['unknown_steps'])})" if c["unknown_steps"] else ""
+        print(f"  cost per run: ${c['known_usd']:.4f}{extra}")
+        for sid, est in c["steps"].items():
+            print(f"    {sid}: " + (f"${est['usd']:.4f}" if est.get("usd") is not None else est.get("reason", "unknown")))
+    if not res["ok"]:
+        raise SystemExit(EXIT_USAGE)
+    return None
+
+
+def cmd_workflow_plan(a: argparse.Namespace) -> Any:
+    res = workflows.plan(a.workflow, output_root(a.out))
+    if a.json:
+        return res
+    print(f"{res['name']} — next step: {res['next'] or res['note']}")
+    for i, r in enumerate(res["steps"], 1):
+        state = f"done {r['done']['run_id']}" if r["done"] else "pending"
+        print(f"\n{i}. {r['id']} [{r['type']}] {state}")
+        if r.get("purpose"):
+            print(f"   purpose: {r['purpose']}")
+        if r.get("command"):
+            print(f"   $ {r['command']}")
+        if r.get("then"):
+            print(f"   $ {r['then']}")
+        if r.get("blocked_by"):
+            print(f"   waiting for: {', '.join(r['blocked_by'])}")
+        if r.get("note"):
+            print(f"   note: {r['note']}")
+        if r.get("checkpoint"):
+            print(f"   check: {r['checkpoint']}")
+    return None
+
+
+def cmd_workflow_export(a: argparse.Namespace) -> Any:
+    dest = workflows.export(a.workflow, Path(a.dest).expanduser(), a.name, a.force)
+    if a.json:
+        return {"path": str(dest)}
+    print(f"Exported workflow skill to {dest}")
+    return None
+
+
+def cmd_workflow_path(a: argparse.Namespace) -> Any:
+    print(workflows.find(a.workflow))
+    return None
+
+
 # ---------------------------------------------------------------------------
 # export / doctor
 # ---------------------------------------------------------------------------
@@ -372,7 +477,15 @@ def cmd_doctor(a: argparse.Namespace) -> Any:
             checks.append(("key valid", ok, "pricing API accepted the key"))
         except FalkitError as e:
             checks.append(("key valid", False, str(e)))
+    checks.append(
+        (
+            "fal MCP",
+            True,
+            "plugin server signs in with OAuth: /mcp → plugin:fal:fal-ai (optional; see references/auth.md)",
+        )
+    )
     checks.append(("profiles", True, " → ".join(str(d) for d in profiles.search_dirs())))
+    checks.append(("workflows", True, " → ".join(str(d) for d in workflows.search_dirs())))
     root = output_root(a.out)
     checks.append(("output dir", os.access(root if root.exists() else Path("."), os.W_OK), str(root.resolve())))
     checks.append(("max cost", True, f"${cost.max_usd(None, None):.2f} per run (FAL_MAX_COST)"))
@@ -518,6 +631,43 @@ def build_parser() -> argparse.ArgumentParser:
     s = pr.add_parser("show", parents=[common])
     s.add_argument("run", nargs="?", default="last")
     s.set_defaults(fn=cmd_runs_show)
+    s = pr.add_parser("files", parents=[common], help="print a run's output files, one per line")
+    s.add_argument("run", nargs="?", default="last")
+    s.add_argument("--kind", choices=["image", "video", "audio", "3d", "file"])
+    s.set_defaults(fn=cmd_runs_files)
+
+    s = sub.add_parser("ingest", parents=[common], help="record local files as a run, so --from can use them")
+    s.add_argument("paths", nargs="+", help="files or directories")
+    s.add_argument("--label", help="tag for the run (workflow steps use <workflow>.<step>)")
+    s.add_argument("--parent", action="append", metavar="REF", help="run(s) these files were made from")
+    s.add_argument("--note", help="what produced these files")
+    s.add_argument("--move", action="store_true", help="delete the source files after copying them in")
+    s.set_defaults(fn=cmd_ingest)
+
+    pw = sub.add_parser("workflow", help="multi-model workflows").add_subparsers(dest="sub", required=True)
+    s = pw.add_parser("init", parents=[common], help="create a workflow (optionally from an example)")
+    s.add_argument("name")
+    s.add_argument("--example", help="start from a bundled example (see `workflow list`)")
+    s.add_argument("--scope", choices=["user", "project"], default="user")
+    s.add_argument("--force", action="store_true")
+    s.set_defaults(fn=cmd_workflow_init)
+    s = pw.add_parser("list", parents=[common])
+    s.set_defaults(fn=cmd_workflow_list)
+    for name, fn, helptext in (
+        ("show", cmd_workflow_show, "print workflow.json"),
+        ("check", cmd_workflow_check, "validate steps, profiles, scripts; estimate the cost of one run"),
+        ("plan", cmd_workflow_plan, "the command for each step, with earlier outputs filled in"),
+        ("path", cmd_workflow_path, "print the workflow directory"),
+    ):
+        s = pw.add_parser(name, parents=[common], help=helptext)
+        s.add_argument("workflow", nargs="?", help="name or path (omit inside an exported workflow skill)")
+        s.set_defaults(fn=fn)
+    s = pw.add_parser("export", parents=[common], help="bundle workflow + profiles + scripts + runtime as a skill")
+    s.add_argument("workflow", nargs="?")
+    s.add_argument("--dest", default=".claude/skills")
+    s.add_argument("--name", help="skill name (default fal-<workflow>)")
+    s.add_argument("--force", action="store_true")
+    s.set_defaults(fn=cmd_workflow_export)
 
     s = sub.add_parser("export", parents=[common], help="export a profile as a standalone skill")
     s.add_argument("profile")

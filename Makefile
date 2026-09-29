@@ -1,4 +1,4 @@
-PYTEST = uv run --quiet --with pytest --with "fal-client>=1.0,<2" --with httpx --with jsonschema pytest
+PYTEST = uv run --quiet --with pytest --with "fal-client>=1.0,<2" --with httpx --with jsonschema --with pillow pytest
 
 .PHONY: test test-live lint validate
 test:            ## offline tests (no key, no network, no cost)
