@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """Optional headersHelper for the fal MCP server (https://mcp.fal.ai/mcp) at Claude Code user scope.
 
-The `fal` plugin connects the server with OAuth (sign in once from /mcp). Use this
-helper instead when you add the server yourself at user or local scope and want it
-to use your API key:
+The `fal` plugin takes the key in its options. Use this helper instead when you
+want the key to stay in env or Bitwarden only: add the server yourself at user or
+local scope and disable the plugin's copy.
 
     claude mcp add-json --scope user fal-ai \
       '{"type":"http","url":"https://mcp.fal.ai/mcp","headersHelper":"python3 /abs/path/scripts/mcp_headers.py"}'
 
 Claude Code runs it when it connects and reads a JSON object of headers from
 stdout. The key comes from the same place the runtime uses (FAL_KEY,
-FAL_KEY_ID/FAL_KEY_SECRET, or bws). With no key it prints `{}`, and Claude Code
-falls back to OAuth. It can't work inside a plugin or a project .mcp.json:
+FAL_KEY_ID/FAL_KEY_SECRET, or bws). With no key it prints `{}` and the connection
+fails with 401 (fal offers Claude Code no OAuth). It can't work inside a plugin or a project .mcp.json:
 Claude Code strips credential variables from helpers those supply.
 
 It prints the key only when Claude Code's helper environment is present, so an
@@ -42,8 +42,8 @@ def main() -> int:
         key = resolve_key(required=False, bws_timeout=8)  # Claude Code gives the helper 10 seconds
         if key:
             headers["Authorization"] = f"Bearer {key}"
-    except Exception as e:  # never break the connection; OAuth still works
-        print(f"mcp_headers: no key ({type(e).__name__}); falling back to OAuth", file=sys.stderr)
+    except Exception as e:  # never crash the helper; Claude Code reports the failed connection
+        print(f"mcp_headers: no key ({type(e).__name__})", file=sys.stderr)
     print(json.dumps(headers))
     return 0
 

@@ -1,6 +1,6 @@
 {
   "name": "fal",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Turn any fal.ai model into a reliable generator, then combine models into workflow skills: fal MCP for discovery, schema-validated profiles, researched prompt templates, a cost guard, and chainable media pipelines.",
   "author": {
     "name": "inovue",
@@ -24,7 +24,19 @@
   "mcpServers": {
     "fal-ai": {
       "type": "http",
-      "url": "https://mcp.fal.ai/mcp"
+      "url": "https://mcp.fal.ai/mcp",
+      "headers": {
+        "Authorization": "Bearer ${user_config.fal_api_key}"
+      }
+    }
+  },
+  "userConfig": {
+    "fal_api_key": {
+      "type": "string",
+      "title": "fal API key (for the fal MCP server)",
+      "description": "Used only by the bundled fal MCP server for model discovery (recommend_model, search_models…). Create one at https://fal.ai/dashboard/keys. The skill itself reads FAL_KEY or Bitwarden, not this value. Leave empty to skip the MCP server.",
+      "sensitive": true,
+      "required": false
     }
   }
 }

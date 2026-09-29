@@ -49,8 +49,9 @@ npx skills add inovue/fal-skills
 Or copy `skills/fal-skill-creator` into `~/.claude/skills/` (or your agent's skills directory).
 
 The Claude Code plugin also connects the official [fal MCP server](https://fal.ai/docs/documentation/setting-up/mcp)
-for model discovery. Sign in once with OAuth from `/mcp` (`plugin:fal:fal-ai`). Generation always goes through the
-skill's runtime, so the cost guard and manifests apply. Other agents can add the server by
+for model discovery. Enter your fal API key when the plugin asks (or later in `/plugin` → fal → Configure options);
+it is kept in the OS credential store. Generation always goes through the skill's runtime, so the cost guard and
+manifests apply. Other agents can add the server by
 hand ([auth.md](skills/fal-skill-creator/references/auth.md)); the skill works without it.
 
 **Requirements:** Python 3.10+ and [uv](https://docs.astral.sh/uv/). With uv, dependencies install automatically on

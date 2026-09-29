@@ -4,7 +4,7 @@ description: Generate images, video, audio, speech and 3D with fal.ai models wit
 license: MIT
 compatibility: Python 3.10+ via uv (recommended) or pip. Network access to fal.ai. A fal API key in FAL_KEY or in Bitwarden Secrets Manager (bws). The fal MCP server is optional and comes with the Claude Code plugin. Works in any agent that can run shell commands.
 metadata:
-  version: 1.1.0
+  version: 1.1.1
   homepage: https://github.com/inovue/fal-skills
 ---
 
@@ -24,9 +24,10 @@ never adds code that could break. Either one can be exported as a standalone ski
 
 ## The fal MCP server and the CLI: who does what
 
-The Claude Code plugin connects the official fal MCP server (`https://mcp.fal.ai/mcp`) as `plugin:fal:fal-ai`. On
-first use it needs a one-time OAuth sign-in: ask the user to run `/mcp`, select it, and sign in to fal. Other agents
-can add it by hand (`references/auth.md`).
+The Claude Code plugin connects the official fal MCP server (`https://mcp.fal.ai/mcp`) as `plugin:fal:fal-ai`. It
+authenticates with the fal API key the user enters in the plugin's options (`/plugin` → fal → Configure options). If
+the server shows as failed in `/mcp`, the key is missing or wrong: point the user there, or to the user-scope setup
+in `references/auth.md`. Other agents can add the server by hand.
 
 - **Use the MCP server to look things up**: `recommend_model` for candidates from a plain-language requirement,
   `search_models`, `get_model_schema` and `get_pricing` for details, and `search_docs` for fal's documentation.
@@ -284,5 +285,5 @@ the sheet into one transparent PNG per asset.
 - `references/prompt-research.md`: how to research and write `prompting.md` (step A4).
 - `references/pipelines.md`: the manifest contract, REF syntax, local steps, and multi-step recipes.
 - `references/workflows.md`: building workflow skills: format, design rules, and the sprite-sheet example.
-- `references/auth.md`: FAL_KEY and Bitwarden setup, the MCP server's sign-in (OAuth or key), and key rotation.
+- `references/auth.md`: FAL_KEY and Bitwarden setup, connecting the MCP server, and key rotation.
 - `references/troubleshooting.md`: common failures by exit code.

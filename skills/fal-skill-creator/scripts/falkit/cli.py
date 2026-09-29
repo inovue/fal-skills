@@ -481,7 +481,7 @@ def cmd_doctor(a: argparse.Namespace) -> Any:
         (
             "fal MCP",
             True,
-            "plugin server signs in with OAuth: /mcp → plugin:fal:fal-ai (optional; see references/auth.md)",
+            "optional; the plugin's server needs the key in /plugin → fal → Configure options (references/auth.md)",
         )
     )
     checks.append(("profiles", True, " → ".join(str(d) for d in profiles.search_dirs())))
