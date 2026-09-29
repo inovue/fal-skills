@@ -23,7 +23,7 @@ jobs:
       - name: Validate SKILL.md
         run: uv run --with pyyaml python scripts/validate_skills.py
       - name: Offline tests
-        run: uv run --with pytest --with "fal-client>=1.0,<2" --with httpx --with jsonschema pytest -q tests
+        run: uv run --with pytest --with "fal-client>=1.0,<2" --with httpx --with jsonschema --with pillow pytest -q tests
 
   live:
     # One real ~$0.003 generation on main, only when the repository has a FAL_KEY secret.
@@ -36,4 +36,4 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - name: Live smoke test
         if: env.FAL_KEY != ''
-        run: FAL_LIVE=1 uv run --with pytest --with "fal-client>=1.0,<2" --with httpx --with jsonschema pytest -q tests -k live
+        run: FAL_LIVE=1 uv run --with pytest --with "fal-client>=1.0,<2" --with httpx --with jsonschema --with pillow pytest -q tests -k live

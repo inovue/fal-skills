@@ -13,7 +13,7 @@ import shutil
 from pathlib import Path
 
 from . import __version__, profiles
-from .core import EXIT_USAGE, SKILL_DIR, FalkitError, read_json
+from .core import EXIT_USAGE, SKILL_DIR, FalkitError, log, read_json
 
 _CATEGORY_VERBS = {
     "text-to-image": "generate images from text",
@@ -42,31 +42,49 @@ def _description(prof: dict) -> str:
     )
 
 
-def export(ref: str, dest_root: Path, name: str | None, force: bool) -> Path:
-    src = profiles.find(ref)
-    prof = read_json(src / "profile.json")
-    skill_name = name or f"fal-{prof['slug']}"
-    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", skill_name):
-        raise FalkitError(f"Invalid skill name {skill_name!r} (lowercase letters, digits, hyphens)", EXIT_USAGE)
+RUNTIME_FILES = ("fal.py", "falkit")
+REFERENCE_FILES = ("pipelines.md", "auth.md", "troubleshooting.md")
+
+
+def prepare_dest(dest_root: Path, skill_name: str, force: bool) -> Path:
+    if not re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", skill_name) or len(skill_name) > 64:
+        raise FalkitError(f"Invalid skill name {skill_name!r} (lowercase letters, digits, single hyphens)", EXIT_USAGE)
     dest = dest_root / skill_name
     if dest.exists():
         if not force:
             raise FalkitError(f"{dest} exists", EXIT_USAGE, hint="Pass --force to overwrite (re-vendors the runtime).")
         shutil.rmtree(dest)
-    if prof.get("prompting_status") != "researched":
-        from .core import log
+    return dest
 
-        log("warning: this profile's prompting.md has not been researched yet — the exported skill will be weaker.")
 
-    (dest / "scripts").mkdir(parents=True)
+def vendor_runtime(dest: Path) -> None:
+    """Copy the runtime and the shared references, so the exported skill runs on its own."""
+    (dest / "scripts").mkdir(parents=True, exist_ok=True)
     shutil.copy2(SKILL_DIR / "scripts" / "fal.py", dest / "scripts" / "fal.py")
     shutil.copytree(
         SKILL_DIR / "scripts" / "falkit", dest / "scripts" / "falkit", ignore=shutil.ignore_patterns("__pycache__")
     )
-    shutil.copytree(src, dest / "profile", ignore=shutil.ignore_patterns("openapi.json"))
-    (dest / "references").mkdir()
-    for ref_file in ("pipelines.md", "auth.md", "troubleshooting.md"):
+    (dest / "references").mkdir(exist_ok=True)
+    for ref_file in REFERENCE_FILES:
         shutil.copy2(SKILL_DIR / "references" / ref_file, dest / "references" / ref_file)
+
+
+def render(template: str, values: dict[str, str]) -> str:
+    for k, v in values.items():
+        template = template.replace("{{" + k + "}}", v)
+    return template
+
+
+def export(ref: str, dest_root: Path, name: str | None, force: bool) -> Path:
+    src = profiles.find(ref)
+    prof = read_json(src / "profile.json")
+    dest = prepare_dest(dest_root, name or f"fal-{prof['slug']}", force)
+    skill_name = dest.name
+    if prof.get("prompting_status") != "researched":
+        log("warning: this profile's prompting.md has not been researched yet — the exported skill will be weaker.")
+
+    vendor_runtime(dest)
+    shutil.copytree(src, dest / "profile", ignore=shutil.ignore_patterns("openapi.json"))
     (dest / "assets").mkdir()
     shutil.copy2(SKILL_DIR / "assets" / "prompting.template.md", dest / "assets" / "prompting.template.md")
 
@@ -83,9 +101,7 @@ def export(ref: str, dest_root: Path, name: str | None, force: bool) -> Path:
         "defaults": _defaults_line(read_json(src / "defaults.json") if (src / "defaults.json").exists() else {}),
         "pricing": _pricing_line(prof.get("pricing")),
     }
-    for k, v in values.items():
-        tpl = tpl.replace("{{" + k + "}}", v)
-    (dest / "SKILL.md").write_text(tpl, encoding="utf-8")
+    (dest / "SKILL.md").write_text(render(tpl, values), encoding="utf-8")
     (dest / "profile" / ".exported.json").write_text(
         json.dumps({"runtime_version": __version__, "source_profile": prof["slug"]}, indent=2) + "\n"
     )

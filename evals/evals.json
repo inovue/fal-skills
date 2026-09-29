@@ -49,6 +49,41 @@
         "Skill documents how to provide the fal key without embedding it",
         "fal API key never appears in any output file"
       ]
+    },
+    {
+      "id": 4,
+      "name": "choose-model-from-requirements",
+      "prompt": "falで、開始フレームと終了フレームの画像を指定できて、1080pで5秒くらいの動画を作れるモデルを探して。商用利用するので、ライセンスも確認したい。1本0.6ドル以内が希望。まだ生成はしないで、候補を比較して見せて。",
+      "expected_output": "A requirement-driven shortlist: candidates from recommend_model (when the fal MCP server is connected) and/or a newest-first catalog search, each finalist's schema checked for an end-frame input, 1080p and ~5 s duration, with prices (unit stated), licence noted, models that fail a hard requirement dropped, no quality claims without evidence, and no generation.",
+      "files": [],
+      "assertions": [
+        "Collected candidates from the model catalog (fal models search) and/or the fal MCP server's recommend_model/search_models",
+        "Checked each finalist's input schema (fal schema or get_model_schema) rather than guessing parameters",
+        "Every model in the final shortlist accepts both a start image and an end image input (field names cited)",
+        "Every model in the final shortlist supports 1080p and a duration of about 5 s according to its schema",
+        "Stated a price with its unit for each finalist and compared it against the $0.60 budget",
+        "Mentioned the licence (or that it is unknown) for each finalist",
+        "Did not claim one model is highest quality without evidence; offered a side-by-side test instead",
+        "Did not submit any generation request (no fal run without --dry-run, no MCP run_model/submit_job)"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "sprite-sheet-workflow",
+      "prompt": "RPGのアイテムアイコンを6個（剣、盾、ポーション、鍵、宝箱、巻物）、同じ画風のピクセルアートで作って、1つずつ背景透過のPNGにして。あとで同じ手順を何度も使いたいので、再利用できるskillにもしておいて。",
+      "expected_output": "The sprite-sheet workflow used end to end: profiles created for the sheet and cutout models, one sheet with 6 separated items generated and checked, background removed, split into 6 transparent PNGs with --expect 6 and recorded with fal ingest, then the workflow exported as a standalone skill that passes its own `workflow plan`.",
+      "files": [],
+      "assertions": [
+        "Used a workflow (fal workflow init --example sprite-sheet or equivalent workflow.json) rather than ad-hoc one-off commands only",
+        "Workflow steps reference profiles, not raw endpoint ids",
+        "Generated a single sheet containing all 6 items, and inspected it before running background removal",
+        "Ran background removal on the sheet with the output of the sheet step wired in (--from label:… or from:REF)",
+        "Produced exactly 6 separate PNG files with transparent backgrounds",
+        "Recorded the split pieces with fal ingest so they have a manifest",
+        "Exported a standalone skill directory containing SKILL.md, workflow.json, bundled profiles and the split script",
+        "Total spend stayed under $0.50 and no step was run with --yes without the user's approval",
+        "fal API key never appears in any output file"
+      ]
     }
   ]
 }

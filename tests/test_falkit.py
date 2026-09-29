@@ -40,6 +40,9 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     monkeypatch.delenv("FAL_PROFILES_DIR", raising=False)
     monkeypatch.delenv("FAL_MAX_COST", raising=False)
+    if not os.environ.get("FAL_LIVE"):  # offline means offline, even on a machine that has a key
+        for v in ("FAL_KEY", "FAL_KEY_ID", "FAL_KEY_SECRET", "BWS_ACCESS_TOKEN"):
+            monkeypatch.delenv(v, raising=False)
     monkeypatch.chdir(tmp_path)
 
 
@@ -231,7 +234,7 @@ def test_assignments_and_set_path():
 
 
 def test_key_resolution_env_first(monkeypatch):
-    from falkit import core
+    from falkit import auth as core
 
     monkeypatch.setattr(core, "_key_cache", None)
     monkeypatch.setenv("FAL_KEY", "abc")
@@ -244,7 +247,7 @@ def test_key_resolution_env_first(monkeypatch):
 
 
 def test_missing_key_is_auth_error(monkeypatch):
-    from falkit import core
+    from falkit import auth as core
 
     monkeypatch.setattr(core, "_key_cache", None)
     for v in ("FAL_KEY", "FAL_KEY_ID", "FAL_KEY_SECRET", "BWS_ACCESS_TOKEN"):

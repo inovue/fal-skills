@@ -1,26 +1,44 @@
 ---
 name: fal-skill-creator
-description: Turn any fal.ai model into a reliable, reusable generator. Search 1,500+ fal models newest-first, pull an endpoint's OpenAPI schema into a profile with pinned defaults, research the model's official prompting guidance into templates, then generate images, video, audio, speech or 3D with a cost guard, and chain outputs between models. Can export a profile as a standalone skill. Use this whenever the user mentions fal, fal.ai or fal.com, names a model hosted on fal (FLUX, Kling, Veo, Seedance, Hunyuan, Recraft, Ideogram, ElevenLabs on fal, etc.), wants to generate or edit media through an API, wants to find the latest fal model for a task, asks to make a skill for a fal model, or wants to pipe one generation into another (image → video → upscale), even if they don't say "skill" or "profile". Not for local Stable Diffusion/ComfyUI or other providers' native APIs.
+description: Generate images, video, audio, speech and 3D with fal.ai models within budget, and package what works as skills. Picks the right model for a requirement (fal MCP recommendations plus a newest-first catalog search), turns it into a profile with pinned defaults and researched prompt templates, runs it behind a cost guard, chains outputs between models, and builds workflow skills that combine several models with local processing (e.g. sprite sheet → background removal → split into assets). Use this whenever the user mentions fal, fal.ai or fal.com, names a model hosted on fal (FLUX, Kling, Veo, Seedance, nano-banana, Recraft, Ideogram, etc.), asks which model is best or cheapest for a media task, wants to generate or edit media through an API, asks for a skill for a fal model or for a multi-step media pipeline, or wants to pipe one generation into another, even if they don't say "skill" or "profile". Not for local Stable Diffusion/ComfyUI or other providers' native APIs.
 license: MIT
-compatibility: Python 3.10+ via uv (recommended) or pip. Network access to fal.ai. A fal API key in FAL_KEY or in Bitwarden Secrets Manager (bws). Works in any agent that can run shell commands.
+compatibility: Python 3.10+ via uv (recommended) or pip. Network access to fal.ai. A fal API key in FAL_KEY or in Bitwarden Secrets Manager (bws). The fal MCP server is optional and comes with the Claude Code plugin. Works in any agent that can run shell commands.
 metadata:
-  version: 1.0.0
-  homepage: https://github.com/OWNER/fal-skills
+  version: 1.1.0
+  homepage: https://github.com/inovue/fal-skills
 ---
 
 # fal skill creator
 
-This skill turns a fal model into something you can call reliably, then uses it. There are two kinds of pieces:
+This skill makes fal models reliable to use, one model at a time or several together. It works in three layers:
 
-- **Profile** (data). This is one folder per model: its schema, pinned defaults, presets, a price snapshot, and
-  `prompting.md` (researched prompt templates). Profiles live in `~/.fal-skills/profiles/`, or in `./.fal/profiles/`
-  when created with `--scope project`.
-- **Runtime** (code). This is `scripts/fal.py`, one tested CLI that searches models, validates inputs, uploads files,
-  checks cost, submits to fal's queue, waits, downloads, and writes a manifest.
+| layer | what it is | where it lives |
+|---|---|---|
+| **Discovery** | Finding and comparing models: the fal MCP server (`recommend_model`, `search_models`, `get_model_schema`, `get_pricing`, `search_docs`) and this skill's `fal models …` commands | MCP server `fal-ai`; `scripts/fal.py` |
+| **Model profiles** | One folder per model: schema, pinned defaults, presets, price snapshot, researched `prompting.md` | `~/.fal-skills/profiles/` (or `./.fal/profiles/` with `--scope project`) |
+| **Workflows** | Several steps (fal models plus local scripts) that turn one requirement into finished assets | `~/.fal-skills/workflows/` (or `./.fal/workflows/`) |
 
-Keeping models as data and the runtime as shared code is deliberate. The same tested code path then serves every
-model, and adding a model never adds new code that could break. A profile can still be exported as a standalone
-skill (Workflow D) when the user wants one skill per model.
+Profiles and workflows are data. One tested runtime (`scripts/fal.py`) validates inputs, uploads files, checks cost,
+submits to fal's queue, waits, downloads, and writes a manifest for every model, so adding a model or a workflow
+never adds code that could break. Either one can be exported as a standalone skill.
+
+## The fal MCP server and the CLI: who does what
+
+The Claude Code plugin connects the official fal MCP server (`https://mcp.fal.ai/mcp`) as `plugin:fal:fal-ai`. On
+first use it needs a one-time OAuth sign-in: ask the user to run `/mcp`, select it, and sign in to fal. Other agents
+can add it by hand (`references/auth.md`).
+
+- **Use the MCP server to look things up**: `recommend_model` for candidates from a plain-language requirement,
+  `search_models`, `get_model_schema` and `get_pricing` for details, and `search_docs` for fal's documentation.
+- **Generate only with `fal run`**, never with the MCP server's `run_model` or `submit_job`. `fal run` is what
+  checks the cost limit before paying, validates arguments against the schema, saves files locally, and writes the
+  manifest that later steps need. Use the MCP execution tools only when the user explicitly asks for them.
+- **Without the MCP server** everything still works: `fal models search`, `fal models show` and `fal schema` cover
+  discovery. Mention once that the plugin adds `recommend_model`, then carry on.
+- **Leave the account tools alone.** The server also manages the user's fal assets, collections and entities
+  (`delete_asset`, `delete_collection`, …). Don't call them unless the user asks for exactly that.
+- **Treat `recommend_model` as candidates, not answers.** It can suggest models of the wrong modality (a video tool
+  for an image task), so check every candidate's schema (A1 step 3).
 
 ## Running the CLI
 
@@ -50,34 +68,46 @@ the network, and the output folders.
 
 ## Pick the workflow
 
+- The user asks **which model** fits a task, or no profile fits their request → **A1. Choose a model**.
 - The user wants media and a suitable profile exists (`fal profile list`) → **B. Generate**.
 - The user names a model or a task but no profile fits → **A. Create a profile**, then **B**.
 - The user wants "a skill for model X" → **A**, then **D. Export**.
-- The user wants several steps (image → video, video → upscale, TTS → lipsync) → **C. Pipelines**.
+- The user wants several steps once (image → video, video → upscale, TTS → lipsync) → **C. Pipelines**.
+- The user wants a **repeatable multi-step process** ("make icon sets", "turn product photos into ads"), or a skill
+  for one → **E. Workflow skills**. A matching workflow may already exist: `fal workflow list`.
 - The user names an exact endpoint id for a one-off job and hasn't asked for reuse → skip profile creation and
-  research. Run `fal schema <id>`, then `fal run -e <id> …`. This works with no profile: the schema is fetched and
-  cached, and validation and the cost guard still apply. Afterwards, offer to turn the model into a profile if it
-  looks like something the user will use again. Building profiles and doing research for a one-off job roughly
-  doubles the time for no benefit.
+  research. Run `fal schema <id>`, then `fal run -e <id> …`. Validation and the cost guard still apply. Afterwards,
+  offer to turn the model into a profile if the user seems likely to use it again. Building profiles and doing
+  research for a one-off job roughly doubles the time for no benefit.
 
-## A. Create a profile (search → schema → defaults → research)
+## A. Create a profile (choose → schema → defaults → research)
 
-### A1. Find the model, newest first
+### A1. Choose a model from the requirement
 
-```bash
-fal models categories                      # when the task type is unclear
-fal models search <terms> -c <category> -n 10 --prices   # --prices adds unit prices in one batched call
-fal models show <endpoint_id>              # description, license, price
-```
+1. **Pin down the requirement.** Ask only for what's missing and matters for the choice, in one message:
+   - what goes in and comes out (text → image, start image → video, start + end frame, audio → lip-sync…)
+   - length, resolution and aspect ratio
+   - whether it needs audio, readable text in the image, or a consistent character or product
+   - whether it's for commercial use (licence)
+   - budget per result, and how many results
+2. **Collect candidates**, using both sources when you have them:
+   - `recommend_model` (MCP) with the requirement in plain language. It knows fal's own view of fitness.
+   - `fal models search <terms> -c <category> -n 10 --prices` for a strict newest-first list with unit prices.
+     Terms are ANDed over id, name, tags and description. Use `--since 90` for recent models and
+     `fal models categories` when the task type is unclear.
+3. **Check the finalists against the hard requirements.** For the top 3–5, read the parameters with
+   `fal schema <id>` or `get_model_schema`: supported durations, resolutions and aspect ratios, and which image,
+   video and audio inputs exist. Parameter names differ between models (`duration` "5" vs "5s", `tail_image_url` vs
+   `end_image_url`), so read them rather than guess. Drop every model that can't do what was asked.
+4. **Present a numbered shortlist**: name, endpoint id, release date, price with its unit, and one line on why it
+   fits or what it trades off. Neither fal's catalog nor schemas carry quality scores, so say so when the user
+   asks for "the best". Order by fit, then recency, then price. Offer to run the top two once on the same prompt
+   (`--dry-run` first for the cost) and compare the results. That comparison is the only reliable quality check.
+   Ask the user to reply with a number. A plain numbered message works better than a multiple-choice widget,
+   which usually allows only a few options.
 
-Search terms are combined with AND and matched against the id, name, tags and description. Results are strictly
-newest first because the catalog is crawled and sorted locally (fal's API has no sort parameter). Use `--since 90`
-when the user wants recent models.
-
-Show the user a numbered shortlist of 5–10 models with name, endpoint id, date, and price when available. Ask them
-to reply with a number. A plain numbered message works better than a multiple-choice widget here, because those
-widgets usually allow only a few options. Skip the question when the user already gave an exact endpoint id. If you
-are running unattended, pick the newest active model that fits the task and say which one you picked and why.
+Skip the question when the user already gave an exact endpoint id. If you are running unattended, pick the newest
+active model that meets every hard requirement, and say which one you picked and why.
 
 ### A2. Create the profile from the schema
 
@@ -118,7 +148,8 @@ Mention the unit price (`profile show`) so the user knows what a run costs. Unat
 Follow `references/prompt-research.md`. In short:
 
 1. Collect official guidance (the fal model page and API docs, fal's blog and learn pages, the model maker's own
-   prompting guide). Prefer Exa search if it is available, otherwise web search and fetch.
+   prompting guide). The MCP server's `search_docs` covers fal's docs. For the rest, prefer Exa search if it is
+   available, otherwise web search and fetch.
 2. Distill it into the profile's `prompting.md`: key rules, prompt structure, named templates with `{slots}`,
    which parameters matter, limitations, verbatim examples, and cited sources with access dates.
 3. Run `fal profile meta <slug> --prompting-status researched`.
@@ -159,9 +190,10 @@ one real run with the user's OK, look at the output, and adjust defaults or temp
 
 Every run is priced before it is submitted, using fal's unit pricing (per image, megapixel, second, and so on).
 The run is blocked with exit code 3 when the estimate exceeds the limit. The limit comes from `--max-cost`, then the
-profile's `max_usd`, then `$FAL_MAX_COST`, then $1.00. A run is also blocked when its cost can't be estimated and
-the unit price is above $0.05. The guard exists so that a video batch never runs up a bill silently. When it trips,
-tell the user the estimate and the reason, and add `--yes` only after they approve. Never add `--yes` pre-emptively.
+profile's `max_usd`, then `$FAL_MAX_COST`, then $1.00. When the cost can't be estimated, the run is blocked unless
+the unit price is at most $0.05. For models billed by GPU time ("compute seconds"), the guard assumes up to a minute
+per request. The guard exists so that a video batch never runs up a bill silently. When it trips, tell the user the
+estimate and the reason, and add `--yes` only after they approve. Never add `--yes` pre-emptively.
 
 ## C. Pipelines (chaining models)
 
@@ -171,16 +203,19 @@ any other tool, can consume it.
 
 ```bash
 fal run -p flux-dev --prompt "…" --label keyframe
-fal run -p kling-i2v --from last --prompt "slow dolly-in …"         # auto-fills image_url from last run's image
-fal run -p upscaler --set video_url=from:last#video                  # explicit: first video output of last run
+fal run -p kling-i2v --from label:keyframe --prompt "slow dolly-in …"   # auto-fills image_url
+fal run -p upscaler --set video_url=from:last#video                     # explicit: first video of last run
 fal run -p lipsync --set video_url=from:last~1 --set audio_url=from:<run_id>#audio
 ```
 
 With `--from REF`, empty media inputs are filled by matching media kind (image, video, audio), required fields
 first. Every link it makes is printed as `wired: …`, so check those lines. Values you pass explicitly with `--set`
-always win. A REF is `last`, `last~N`, a run id, a run directory, or a manifest path. `#sel` picks one output: an
-index, a kind, a field, or `*` for all. A hosted URL is reused when it still resolves; otherwise the saved local
-copy is re-uploaded.
+always win. A REF is `last`, `last~N`, `label:TAG` (the newest run with that `--label`), a run id, a run directory,
+or a manifest path. `#sel` picks one output: an index, a kind, a field, or `*` for all.
+
+**Local steps.** When you process files yourself between models (crop, split, ffmpeg), record the results with
+`fal ingest <files-or-dir> --label <tag> --parent <REF>`. They then get a manifest, and `--from label:<tag>` works
+on them like any other run. `fal runs files <REF>` prints a run's files, one per line, for the next local command.
 
 For a multi-step request, run the steps one at a time and look at each intermediate result before paying for the
 next, more expensive step. The full manifest schema and recipes are in `references/pipelines.md`.
@@ -196,6 +231,31 @@ vendored copy of this runtime. It runs on its own and can be installed with `npx
 before exporting, because the exported skill is only as good as its `prompting.md`. After updating this skill,
 re-export with `--force` to refresh the vendored runtime.
 
+## E. Workflow skills (several models, one requirement)
+
+A workflow turns a repeatable requirement into finished assets through several steps: `fal` steps (each names a
+profile), `local` steps (a script in the workflow), and `review` steps (a human decision). Read
+`references/workflows.md` before building one. The short version:
+
+```bash
+fal workflow init <name> [--example sprite-sheet]   # scaffold, or start from a bundled example
+# edit workflow.json (steps) and WORKFLOW.md (what the agent does and checks at each step)
+fal workflow check <name>     # structure, missing profiles (with the `profile init` command), cost of one run
+fal workflow plan <name>      # the exact command for each step, with earlier outputs filled in; names the next step
+fal workflow export <name> --dest .claude/skills     # workflow + its profiles + scripts + runtime → one skill
+```
+
+Build it the way you'd build it by hand: run the steps once with the user on a small input, checking each result,
+then write down what worked in `WORKFLOW.md`. Rules that keep workflows robust:
+
+- **Steps name profiles, never endpoints.** Upgrading a model then means re-pointing one profile.
+- **Workflow-specific processing stays in the workflow's `scripts/`**, not in this runtime.
+- **One step at a time, with a check after each paid step.** A bad first image makes every later step wasted money.
+- **Make a workflow only for something the user will repeat.** For a one-off chain, use C.
+
+The bundled `sprite-sheet` example draws a set of matching assets on one sheet, removes the background, and splits
+the sheet into one transparent PNG per asset.
+
 ## Maintenance
 
 - **Schema drift.** When a run fails validation on a profile that used to work, or every few weeks:
@@ -209,18 +269,20 @@ re-export with `--force` to refresh the vendored runtime.
   suggest adding `fal-outputs/` to `.gitignore` when working inside a git repo.
 - The API key comes from `FAL_KEY`, or from bws (`BWS_ACCESS_TOKEN` plus a secret named `FAL_KEY`, or set
   `FAL_BWS_SECRET_ID`). The runtime never prints the key, never passes it as a command-line argument, and never
-  writes it to disk. Don't echo it, write it into files, or paste it into commands yourself. `fal doctor` confirms
-  where it was found.
+  writes it to disk. Don't echo it, write it into files, or paste it into commands yourself, and don't run
+  `scripts/mcp_headers.py` (an optional MCP auth helper that prints the key). `fal doctor` confirms where the key
+  was found.
 - Uploaded inputs and generated outputs are stored on fal's CDN at unguessable but public URLs. Only upload
   (`@path`) files the user pointed you to, and check with the user before uploading anything that looks private
   (faces of real people, documents). Uploads happen only after the cost guard passes.
-- Price units differ between models (per image, per megapixel, per second, per "unit"). When comparing models, say
-  what the unit is. When a price is quoted per opaque "units", the cost guard treats the estimate as uncertain.
+- Price units differ between models (per image, per megapixel, per second, per compute second, per "unit"). When
+  comparing models, say what the unit is. GPU-time and opaque "unit" prices can't be estimated exactly.
 
 ## Reference files
 
-- `references/cli.md`: every command and flag, the profile file formats, and environment variables.
+- `references/cli.md`: every command and flag, the profile and workflow file formats, and environment variables.
 - `references/prompt-research.md`: how to research and write `prompting.md` (step A4).
-- `references/pipelines.md`: the manifest contract, REF syntax, multi-step recipes, and use from other tools.
-- `references/auth.md`: FAL_KEY and Bitwarden setup, and key rotation.
+- `references/pipelines.md`: the manifest contract, REF syntax, local steps, and multi-step recipes.
+- `references/workflows.md`: building workflow skills: format, design rules, and the sprite-sheet example.
+- `references/auth.md`: FAL_KEY and Bitwarden setup, the MCP server's sign-in (OAuth or key), and key rotation.
 - `references/troubleshooting.md`: common failures by exit code.

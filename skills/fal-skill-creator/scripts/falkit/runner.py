@@ -97,23 +97,27 @@ def _index_entries(root: Path) -> list[dict]:
 
 
 def load_manifest(ref: str, root: Path) -> tuple[Path, dict]:
-    """Resolve 'last', 'last~N', a run id, a run dir, or a manifest path."""
+    """Resolve 'last', 'last~N', 'label:TAG', 'label:TAG~N', a run id, a run dir, or a manifest path."""
     p = Path(ref).expanduser()
     if p.is_dir() and (p / "manifest.json").exists():
         return p / "manifest.json", read_json(p / "manifest.json")
     if p.is_file():
         return p, read_json(p)
     entries = _index_entries(root)
-    m = re.fullmatch(r"last(?:~(\d+))?", ref)
+    m = re.fullmatch(r"(?:label:(?P<label>[^~]+)|last)(?:~(?P<back>\d+))?", ref)
     if m:
-        back = int(m.group(1) or 0)
+        if m.group("label"):  # workflow steps refer to each other by label, not by position
+            entries = [e for e in entries if e.get("label") == m.group("label")]
+        back = int(m.group("back") or 0)
         if len(entries) <= back:
-            raise FalkitError(f"No run {ref!r} in {index_path(root)}", EXIT_USAGE)
-        mp = root / entries[-1 - back]["manifest"]
+            raise FalkitError(
+                f"No run {ref!r} in {index_path(root)}", EXIT_USAGE, hint="Use `fal.py runs list` to see labels."
+            )
+        mp = (root / entries[-1 - back]["manifest"]).resolve()
         return mp, read_json(mp)
     for e in reversed(entries):
         if e.get("run_id") == ref:
-            mp = root / e["manifest"]
+            mp = (root / e["manifest"]).resolve()
             return mp, read_json(mp)
     raise FalkitError(f"Cannot resolve run reference {ref!r}", EXIT_USAGE, hint="Use `fal.py runs list`.")
 
@@ -508,6 +512,114 @@ def finalize(run_dir: Path, request: dict, result: Any, root: Path, download_fil
     return manifest
 
 
+def _image_size(path: Path) -> tuple[int, int] | None:
+    """Width and height from a PNG or JPEG header (no image library needed)."""
+    try:
+        with path.open("rb") as f:
+            head = f.read(26)
+            if head[:8] == b"\x89PNG\r\n\x1a\n":
+                return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
+            if head[:2] != b"\xff\xd8":
+                return None
+            f.seek(2)
+            while True:
+                marker = f.read(2)
+                if len(marker) < 2 or marker[0] != 0xFF:
+                    return None
+                size = int.from_bytes(f.read(2), "big")
+                if 0xC0 <= marker[1] <= 0xCF and marker[1] not in (0xC4, 0xC8, 0xCC):
+                    data = f.read(5)
+                    return int.from_bytes(data[3:5], "big"), int.from_bytes(data[1:3], "big")
+                f.seek(size - 2, 1)
+    except OSError:
+        return None
+
+
+def ingest(
+    paths: list[Path],
+    root: Path,
+    label: str | None,
+    parent_refs: list[str],
+    note: str | None = None,
+    move: bool = False,
+) -> dict:
+    """Record local files (a local processing step's output) as a run, so later runs can use them.
+
+    Files are copied into the run directory, so the manifest stays valid when the
+    originals change. Directories are expanded (sorted, non-hidden files only).
+    With move=True the sources are deleted afterwards, which leaves a workflow's
+    scratch directory empty for the next run.
+    """
+    files: list[Path] = []
+    for p in paths:
+        p = Path(p).expanduser()
+        if p.is_dir():
+            files += sorted(f for f in p.rglob("*") if f.is_file() and not f.name.startswith("."))
+        elif p.is_file():
+            files.append(p)
+        else:
+            raise FalkitError(f"Not found: {p}", EXIT_USAGE)
+    if not files:
+        raise FalkitError("Nothing to ingest (no files found)", EXIT_USAGE)
+    parents = [str(load_manifest(ref, root)[0]) for ref in parent_refs]
+    run_id, run_dir = new_run_dir(root, "local", label)
+    outputs, used = [], set()
+    for i, src in enumerate(files):
+        name = src.name if src.name not in used else f"{i}-{src.name}"
+        used.add(name)
+        dest = run_dir / name
+        dest.write_bytes(src.read_bytes())
+        entry: dict[str, Any] = {
+            "field": f"files.{i}",
+            "kind": _kind(mimetypes.guess_type(src.name)[0], src.name),
+            "url": None,  # not hosted yet; a later fal run uploads local_path when it needs a URL
+            "content_type": mimetypes.guess_type(src.name)[0],
+            "local_path": str(dest.resolve()),
+            "bytes": dest.stat().st_size,
+            "sha256": _sha256(dest),
+        }
+        size = _image_size(dest) if entry["kind"] == "image" else None
+        if size:
+            entry["width"], entry["height"] = size
+        outputs.append(entry)
+    stamp = now_iso()
+    arguments = {"note": note, "sources": [str(f.resolve()) for f in files]}
+    manifest = {
+        "format": MANIFEST_FORMAT,
+        "run_id": run_id,
+        "created_at": stamp,
+        "completed_at": stamp,
+        "endpoint_id": "local",
+        "profile": None,
+        "request_id": None,
+        "label": label,
+        "arguments": arguments,
+        "input_sources": {},
+        "parents": parents,
+        "cost_estimate": {"usd": 0.0, "confidence": "high"},
+        "seed": None,
+        "outputs": outputs,
+        "text": {},
+        "run_dir": str(run_dir.resolve()),
+        "runtime_version": __version__,
+    }
+    request = {
+        "run_id": run_id,
+        "status": "completed",
+        "endpoint_id": "local",
+        "label": label,
+        "arguments": arguments,
+        "submitted_at": stamp,
+    }
+    write_json(run_dir / "request.json", request)
+    write_json(run_dir / "manifest.json", manifest)
+    _append_index(root, manifest, run_dir)
+    if move:
+        for f in files:
+            f.unlink(missing_ok=True)
+    return manifest
+
+
 def _append_index(root: Path, manifest: dict, run_dir: Path) -> None:
     line = {
         "run_id": manifest["run_id"],
@@ -516,7 +628,7 @@ def _append_index(root: Path, manifest: dict, run_dir: Path) -> None:
         "profile": manifest.get("profile"),
         "label": manifest.get("label"),
         "kinds": sorted({o["kind"] for o in manifest["outputs"]}),
-        "prompt": truncate(manifest["arguments"].get("prompt"), 120),
+        "prompt": truncate(manifest["arguments"].get("prompt") or manifest["arguments"].get("note"), 120),
         "cost_usd": (manifest.get("cost_estimate") or {}).get("usd"),
         "manifest": str((run_dir / "manifest.json").resolve().relative_to(root.resolve())),
     }
@@ -771,7 +883,8 @@ def run_many(
             hint="Ask the user to approve, then rerun with --yes (or raise --max-cost).",
         )
     log(f"cost: {reason}")
-    if any(p.input_sources for p in plans):  # pass 2: real uploads / URL liveness checks
+    # Pass 2: real uploads / URL liveness checks. --mock never touches the network, so it keeps pass 1's placeholders.
+    if opts.mock_result is None and any(p.input_sources for p in plans):
         real = Uploader(dry_run=False)
         plans = [
             prepare(

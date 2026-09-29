@@ -14,6 +14,7 @@ from typing import Any
 
 DEFAULT_MAX_USD = 1.00
 UNKNOWN_UNIT_AUTO_OK_USD = 0.05  # unknown quantity but the unit itself is cheap → just warn
+GPU_SECONDS_ASSUMED = 60  # GPU-time pricing: assume up to a minute per request when checking the limit
 
 # fal's named image sizes (width x height)
 IMAGE_SIZES = {
@@ -72,6 +73,18 @@ def estimate(price: dict | None, args: dict, input_schema: dict) -> dict[str, An
     n = _count(args)
     qty: float | None
     confidence = "high"
+    if "compute" in unit or "gpu" in unit:
+        # Billed by GPU time, which depends on the input and the queue, not on a request argument.
+        # Never map it onto `duration`: a 5 s video can take minutes of compute.
+        return {
+            "usd": None,
+            "unit_price": unit_price,
+            "unit": unit,
+            "quantity": None,
+            "confidence": "unknown",
+            "reason": f"billed by GPU time (${unit_price} per {unit})",
+            "currency": price.get("currency", "USD"),
+        }
     if unit in {"image", "images"}:
         qty = n
     elif unit in {"megapixel", "megapixels", "mp"}:
@@ -132,6 +145,16 @@ def guard(total: dict, limit: float) -> tuple[bool, str]:
     usd = total.get("usd")
     if usd is None:
         unit_price = total.get("unit_price")
+        unit = str(total.get("unit") or "")
+        if unit_price is not None and ("compute" in unit or "gpu" in unit):
+            items = total.get("items") or 1
+            worst = unit_price * GPU_SECONDS_ASSUMED * items
+            if worst <= limit:
+                return True, f"billed by GPU time; up to ~${worst:.4f} for {items} request(s) at {GPU_SECONDS_ASSUMED}s each"
+            return False, (
+                f"billed by GPU time (${unit_price} per {unit}); {items} request(s) could reach ~${worst:.2f} "
+                f"at {GPU_SECONDS_ASSUMED}s each, above the ${limit:g} limit"
+            )
         if unit_price is not None and unit_price <= UNKNOWN_UNIT_AUTO_OK_USD:
             return True, f"quantity unknown for unit {total.get('unit')!r}; unit price ${unit_price} is small"
         return False, (
@@ -148,7 +171,13 @@ def combine(estimates: list[dict]) -> dict:
         return {"usd": 0.0, "confidence": "high"}
     if any(e.get("usd") is None for e in estimates):
         first = estimates[0]
-        return {"usd": None, "confidence": "unknown", "unit": first.get("unit"), "unit_price": first.get("unit_price")}
+        return {
+            "usd": None,
+            "confidence": "unknown",
+            "unit": first.get("unit"),
+            "unit_price": first.get("unit_price"),
+            "items": len(estimates),
+        }
     order = ["high", "medium", "low", "unknown"]
     worst = max((e.get("confidence", "high") for e in estimates), key=order.index)
     return {

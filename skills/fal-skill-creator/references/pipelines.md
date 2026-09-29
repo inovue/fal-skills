@@ -9,8 +9,9 @@ produce or consume it too.
 2. manifest.json schema
 3. Referencing earlier runs (REF syntax)
 4. Auto-wiring rules
-5. Recipes
-6. Using manifests from other tools
+5. Local steps (`fal ingest`)
+6. Recipes
+7. Using manifests from other tools
 
 ## 1. Directory layout
 
@@ -72,6 +73,7 @@ Outputs are found generically: any object in the result that has a `url` is trea
 |---|---|
 | `last` | the most recently completed run in this output root |
 | `last~1`, `last~2` | the runs before that |
+| `label:TAG`, `label:TAG~1` | the newest run with `--label TAG` (and the one before it); workflows label steps `<workflow>.<step>` |
 | `<run_id>` | a specific run (from `fal runs list`) |
 | `<run_dir>` or `<…/manifest.json>` | a path, which also works across output roots and projects |
 
@@ -99,7 +101,21 @@ so pipelines keep working after the CDN URL expires.
 4. Every decision is printed as `wired: field ← run#output`. Read these lines. If a guess is wrong (e.g. a model
    has both `image_url` and `end_image_url`), use explicit `--set` for the ambiguous field.
 
-## 5. Recipes
+## 5. Local steps (`fal ingest`)
+
+When you process files yourself between models (split a sheet, crop, composite, ffmpeg), record the results:
+
+```bash
+uv run split_sprites.py "$(fal runs files label:cutout --kind image | head -1)" --out work/split
+fal ingest work/split --label split --parent label:cutout --move
+fal run -p upscaler --set image_url=from:label:split#3      # the 4th piece
+```
+
+`ingest` copies the files into a new run directory, writes a manifest (`endpoint_id: "local"`, cost 0, kinds from
+file extensions, image sizes from PNG and JPEG headers), and appends to `index.jsonl`. Its outputs have
+`url: null`, so a later fal run uploads the local copy when it needs a URL. `--parent` keeps the lineage intact.
+
+## 6. Recipes
 
 **Keyframe, then animate, then upscale**
 ```bash
@@ -128,12 +144,10 @@ chosen run id explicitly: `--from <run_id>`.
 **Pay for the expensive step only after checking the cheap one.** Stop between steps, show the user the
 intermediate result, and only then continue. Video generation often costs 10–100× more than a keyframe.
 
-## 6. Using manifests from other tools
+## 7. Using manifests from other tools
 
 - **Other fal-\* skills** (exported with `fal export`) ship the same runtime, so `--from` works across them
   whenever they share the output root. Keep the default `./fal-outputs`, or set `FAL_OUTPUT_DIR` once.
 - **Non-fal tools** (ffmpeg, editors, upload scripts) read `outputs[].local_path`:
   `jq -r '.outputs[] | select(.kind=="video") | .local_path' fal-outputs/…/manifest.json`
-- **Producing a manifest by hand** (to feed an external file into `--from`): write a minimal
-  `{"format":"fal-manifest@1","run_id":"ext-1","outputs":[{"kind":"image","local_path":"/abs/x.png","url":null}]}`.
-  The runtime uploads `local_path` because `url` is null.
+- **Feeding external files into `--from`**: `fal ingest <files> --label <tag>` writes a proper manifest for them.
