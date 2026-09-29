@@ -20,8 +20,11 @@ Lookup order: <skill dir> itself (an exported workflow skill) → ./.fal/workflo
 from __future__ import annotations
 
 import json
+import os
 import re
+import shlex
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -242,7 +245,8 @@ def step_label(wf: dict, step_id: str) -> str:
 
 
 def _quote(s: str) -> str:
-    return s if re.fullmatch(r"[\w./:@%+=,-]+", s) else "'" + s.replace("'", "'\"'\"'") + "'"
+    """Quote for the platform's shell: double quotes on Windows (cmd and PowerShell), POSIX quoting elsewhere."""
+    return subprocess.list2cmdline([s]) if os.name == "nt" else shlex.quote(s)
 
 
 def _latest(wf: dict, sid: str, out_root: Path) -> tuple[Path, dict] | None:
