@@ -7,15 +7,15 @@
 #   "jsonschema>=4.21",
 # ]
 # ///
-"""fal.ai toolkit for agents: discover models, build profiles, generate, chain.
+"""fal.ai toolkit for agents: researched model profiles, templated generation, pipelines, workflows.
 
     uv run scripts/fal.py doctor
     uv run scripts/fal.py models search "video" -c image-to-video
     uv run scripts/fal.py profile init fal-ai/flux/dev
-    uv run scripts/fal.py run -p flux-dev --prompt "a red fox" --dry-run
+    uv run scripts/fal.py profile check flux-dev
+    uv run scripts/fal.py run -p flux-dev -t general --slot subject="a red fox" … --dry-run
 
-Exit codes: 0 ok · 2 usage/validation · 3 cost needs approval (--yes)
-            4 auth · 5 fal API error · 6 timeout (resume with `fetch`)
+Exit codes: 0 ok · 2 usage/validation · 4 auth · 5 fal API error · 6 timeout (resume with `fetch`)
 """
 
 import sys

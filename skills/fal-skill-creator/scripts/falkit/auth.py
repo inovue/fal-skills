@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
+import time
 from typing import Any
 
 from .errors import EXIT_AUTH, FalkitError
@@ -18,17 +20,27 @@ from .errors import EXIT_AUTH, FalkitError
 _key_cache: tuple[str, str] | None = None
 
 
-def _bws_json(args: list[str], timeout: float = 60) -> Any:
-    try:
-        proc = subprocess.run(
-            ["bws", *args, "--output", "json"],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=os.environ.copy(),
-        )
-    except subprocess.TimeoutExpired as e:
-        raise FalkitError("bws timed out", EXIT_AUTH) from e
+# Bitwarden's API has brief outages (503s, connection resets); one of those shouldn't fail the whole command.
+_BWS_TRANSIENT = re.compile(r"\[(?:429|5\d\d)\b|timed? ?out|connection (?:reset|refused|error)|disconnect", re.I)
+
+
+def _bws_json(args: list[str], timeout: float = 60, attempts: int = 3) -> Any:
+    for attempt in range(attempts):
+        try:
+            proc = subprocess.run(
+                ["bws", *args, "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env=os.environ.copy(),
+                encoding="utf-8",
+                errors="replace",
+            )
+        except subprocess.TimeoutExpired as e:
+            raise FalkitError("bws timed out", EXIT_AUTH) from e
+        if proc.returncode == 0 or not _BWS_TRANSIENT.search(proc.stderr) or attempt == attempts - 1:
+            break
+        time.sleep(1.5 * (attempt + 1))
     if proc.returncode != 0:
         # bws error text never contains the secret value, safe to surface.
         raise FalkitError(

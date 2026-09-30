@@ -1,0 +1,134 @@
+{
+  "format": "fal-guides@1",
+  "note": "Researched input guides that `fal profile init` copies into new profiles. Keys are endpoint ids. `recommend` is applied as defaults; `validated` records the real runs that confirmed the templates.",
+  "guides": {
+    "openai/gpt-image-2.5/sunburst/text-to-image": {
+      "file": "gpt-image-2.5-text-to-image.md",
+      "slug": "gpt-image",
+      "recommend": {
+        "quality": "medium",
+        "output_format": "png"
+      },
+      "presets": {
+        "hero": {
+          "image_size": {
+            "width": 1920,
+            "height": 1088
+          }
+        },
+        "vertical": {
+          "image_size": {
+            "width": 1088,
+            "height": 1920
+          }
+        },
+        "asset": {
+          "background": "transparent",
+          "output_format": "png"
+        }
+      },
+      "validated": "2026-09-30: text-graphic, product-shot, keyframe, asset and the sprite-sheet template, medium quality, results matched the prompts"
+    },
+    "openai/gpt-image-2.5/flare/text-to-image": {
+      "file": "gpt-image-2.5-text-to-image.md",
+      "slug": "gpt-image-flare",
+      "recommend": {
+        "quality": "medium",
+        "output_format": "png"
+      },
+      "presets": {
+        "hero": {
+          "image_size": {
+            "width": 1920,
+            "height": 1088
+          }
+        },
+        "vertical": {
+          "image_size": {
+            "width": 1088,
+            "height": 1920
+          }
+        },
+        "asset": {
+          "background": "transparent",
+          "output_format": "png"
+        }
+      }
+    },
+    "openai/gpt-image-2.5/sunburst/edit": {
+      "file": "gpt-image-2.5-edit.md",
+      "slug": "gpt-image-edit",
+      "recommend": {
+        "quality": "medium",
+        "output_format": "png"
+      },
+      "presets": {
+        "cutout": {
+          "background": "transparent",
+          "output_format": "png"
+        }
+      },
+      "validated": "2026-09-30: quick template (recolor one object), only the named object changed"
+    },
+    "openai/gpt-image-2.5/flare/edit": {
+      "file": "gpt-image-2.5-edit.md",
+      "slug": "gpt-image-flare-edit",
+      "recommend": {
+        "quality": "medium",
+        "output_format": "png"
+      },
+      "presets": {
+        "cutout": {
+          "background": "transparent",
+          "output_format": "png"
+        }
+      }
+    },
+    "minimax/h3-max/image-to-video": {
+      "file": "h3-max-image-to-video.md",
+      "slug": "h3-max-i2v",
+      "recommend": {
+        "resolution": "768P",
+        "duration": 5,
+        "prompt_expansion_mode": "disabled"
+      },
+      "presets": {
+        "draft": {
+          "resolution": "768P",
+          "duration": 5
+        },
+        "final": {
+          "resolution": "1080P"
+        }
+      },
+      "validated": "2026-09-30: animate template from a gpt-image keyframe, 480P 5 s, camera and preserved details as asked, audio present"
+    },
+    "minimax/h3-max/text-to-video": {
+      "file": "h3-max-text-to-video.md",
+      "slug": "h3-max-t2v",
+      "recommend": {
+        "resolution": "768P",
+        "duration": 5,
+        "prompt_expansion_mode": "disabled"
+      },
+      "presets": {
+        "draft": {
+          "resolution": "768P",
+          "duration": 5
+        },
+        "final": {
+          "resolution": "1080P"
+        },
+        "vertical": {
+          "aspect_ratio": "9:16"
+        }
+      },
+      "validated": "2026-09-30: quick template, 480P 5 s, scene and camera as asked, audio present"
+    },
+    "fal-ai/ideogram/remove-background": {
+      "file": "ideogram-remove-background.md",
+      "slug": "remove-bg",
+      "validated": "2026-09-30: product photo cut out cleanly"
+    }
+  }
+}

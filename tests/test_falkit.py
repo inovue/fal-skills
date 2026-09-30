@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -19,19 +20,19 @@ SCRIPTS = ROOT / "skills" / "fal-skill-creator" / "scripts"
 FIX = Path(__file__).parent / "fixtures"
 sys.path.insert(0, str(SCRIPTS))
 
-from falkit import cost, profiles, runner, schema  # noqa: E402
+from falkit import export, profiles, runner, schema, templates  # noqa: E402
 from falkit.core import FalkitError, parse_assignment, set_path  # noqa: E402
 
 
 @pytest.fixture
 def flux() -> dict:
-    return schema.compact(json.loads((FIX / "openapi-flux-dev.json").read_text()), "fal-ai/flux/dev")
+    return schema.compact(json.loads((FIX / "openapi-flux-dev.json").read_text(encoding="utf-8")), "fal-ai/flux/dev")
 
 
 @pytest.fixture
 def kling() -> dict:
     ep = "fal-ai/kling-video/v2.1/standard/image-to-video"
-    return schema.compact(json.loads((FIX / "openapi-kling-i2v.json").read_text()), ep)
+    return schema.compact(json.loads((FIX / "openapi-kling-i2v.json").read_text(encoding="utf-8")), ep)
 
 
 @pytest.fixture(autouse=True)
@@ -39,11 +40,11 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("FAL_SKILLS_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     monkeypatch.delenv("FAL_PROFILES_DIR", raising=False)
-    monkeypatch.delenv("FAL_MAX_COST", raising=False)
     if not os.environ.get("FAL_LIVE"):  # offline means offline, even on a machine that has a key
         for v in ("FAL_KEY", "FAL_KEY_ID", "FAL_KEY_SECRET", "BWS_ACCESS_TOKEN"):
             monkeypatch.delenv(v, raising=False)
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(profiles, "url_status", lambda url: 200)  # source checks stay offline
 
 
 # --- schema ---------------------------------------------------------------
@@ -88,32 +89,149 @@ def test_cli_value_coercion(kling, flux):
     assert schema.coerce_cli_value("prompt", "hello", flux["input"]) == "hello"
 
 
-# --- cost -----------------------------------------------------------------
-def test_cost_megapixels(flux):
-    e = cost.estimate(
-        {"unit_price": 0.025, "unit": "megapixels"}, {"image_size": "square_hd", "num_images": 2}, flux["input"]
+# --- prompt field -----------------------------------------------------------
+def test_prompt_field_detection(flux, kling):
+    assert schema.prompt_field(flux["input"]) == "prompt"
+    tts = {"type": "object", "properties": {"text": {"type": "string"}, "voice": {"type": "string"}}}
+    assert schema.prompt_field(tts) == "text"
+    assert schema.prompt_field({"type": "object", "properties": {"image_url": {"type": "string"}}}) is None
+    t = runner.Target("fal-ai/tts", tts)
+    assert runner.build_arguments(t, prompt="hello") == {"text": "hello"}
+    with_default = {"type": "object", "properties": {"prompt": {"type": "string", "default": "a cat"}}}
+    assert "prompt" not in schema.schema_defaults(with_default)  # a default prompt must never stand in for one
+
+
+# --- templates ------------------------------------------------------------
+GUIDE = """# Input guide
+## Templates
+
+```template product
+{subject} on {surface}, {lighting}. {style}.
+```
+
+~~~template literal
+JSON-ish {{braces}} stay, {subject} fills
+~~~
+"""
+
+
+def test_template_parse_and_render():
+    found = templates.parse(GUIDE)
+    assert list(found) == ["product", "literal"]
+    assert templates.slots(found["product"]) == ["subject", "surface", "lighting", "style"]
+    text, unused, _ = templates.render(
+        found["product"], {"subject": "a bottle", "surface": "slate", "lighting": "softbox", "style": "photo", "x": 1}
     )
-    assert e["confidence"] == "high" and e["usd"] == pytest.approx(0.025 * 1.05 * 2)
+    assert text == "a bottle on slate, softbox. photo." and unused == ["x"]
+    # a required slot can't be left empty: that part of the template would dangle
+    with pytest.raises(FalkitError, match="given empty"):
+        templates.render(found["product"], {"subject": "a bottle", "surface": "slate", "lighting": "", "style": ""})
+    text, _, _ = templates.render(found["literal"], {"subject": ["a", "b"]})
+    assert text == "JSON-ish {braces} stay, a, b fills"
+    with pytest.raises(FalkitError) as e:
+        templates.render(found["product"], {"subject": "x"})
+    assert e.value.code == 2 and "surface" in str(e.value)
 
 
-def test_cost_seconds_uses_schema_default(kling):
-    e = cost.estimate({"unit_price": 0.056, "unit": "seconds"}, {}, kling["input"])
-    assert e["usd"] == pytest.approx(0.28)
-    e = cost.estimate({"unit_price": 0.056, "unit": "seconds"}, {"duration": "10"}, kling["input"])
-    assert e["usd"] == pytest.approx(0.56)
+def test_legacy_template_headings_still_parse():
+    legacy = "## Templates\n\n### general\n```text\n{subject}, {style}.\n```\nwhen\n\n## Parameters\n"
+    assert templates.parse(legacy) == {"general": "{subject}, {style}."}
 
 
-def test_cost_guard_blocks_and_limits(monkeypatch):
-    ok, _ = cost.guard({"usd": 0.5}, 1.0)
-    assert ok
-    ok, reason = cost.guard({"usd": 2.0}, 1.0)
-    assert not ok and "exceeds" in reason
-    assert cost.guard({"usd": None, "unit_price": 0.01, "unit": "tokens"}, 1.0)[0]
-    assert not cost.guard({"usd": None, "unit_price": 0.5, "unit": "tokens"}, 1.0)[0]
-    monkeypatch.setenv("FAL_MAX_COST", "3")
-    assert cost.max_usd(None, None) == 3.0
-    assert cost.max_usd(None, {"cost_guard": {"max_usd": 7}}) == 7.0
-    assert cost.max_usd(0.5, {"cost_guard": {"max_usd": 7}}) == 0.5
+# --- prompting.md check ------------------------------------------------------
+RESEARCHED = """<!--
+status: unresearched
+researched_at:
+-->
+# Input guide: FLUX dev
+
+## Key rules
+- Write prose, subject first [S1].
+- Quote on-screen text [S1].
+- Put style last [S2].
+
+## Prompt structure
+Subject, then action, then setting.
+
+## Templates
+
+```template general
+Editorial photograph: {subject}, {action}, {setting}. Natural light, true colors.[[ Style: {style}.]]
+```
+
+## Parameters that matter
+
+| parameter | when to change | recommended |
+|---|---|---|
+| guidance_scale | literal prompts | 3.5 |
+
+## Sources
+- [S1] FLUX guide — https://docs.bfl.ai/guides/prompting — official — accessed 2026-09-30
+- [S2] fal model page — https://fal.ai/models/fal-ai/flux/dev — fal — accessed 2026-09-30
+"""
+
+
+def _hand_profile(tmp_path: Path, compact: dict, slug: str = "flux-dev", guide: str | None = None) -> Path:
+    d = tmp_path / "home" / "profiles" / slug
+    d.mkdir(parents=True)
+    (d / "schema.json").write_text(json.dumps(compact), encoding="utf-8")
+    (d / "defaults.json").write_text(json.dumps(schema.schema_defaults(compact["input"])), encoding="utf-8")
+    (d / "profile.json").write_text(
+        json.dumps(
+            {
+                "slug": slug,
+                "endpoint_id": compact["endpoint_id"],
+                "display_name": slug,
+                "category": compact.get("category"),
+                "pricing": {"unit_price": 0.025, "unit": "megapixels"},
+                "prompting_status": "unresearched",
+            }
+        ), encoding="utf-8")
+    stub = (SCRIPTS.parent / "assets" / "prompting.template.md").read_text(encoding="utf-8")
+    (d / "prompting.md").write_text(guide if guide is not None else stub, encoding="utf-8")
+    return d
+
+
+def test_profile_check_gates_researched_status(tmp_path, flux):
+    d = _hand_profile(tmp_path, flux)
+    rep = profiles.check("flux-dev")
+    assert any("Not researched yet" in e for e in rep["errors"])
+    assert any("Key rules" in e for e in rep["errors"]) and any("Sources" in e for e in rep["errors"])
+    with pytest.raises(FalkitError) as e:
+        profiles.set_meta("flux-dev", prompting_status="researched")
+    assert e.value.code == 2
+
+    (d / "prompting.md").write_text(RESEARCHED, encoding="utf-8")
+    rep = profiles.check("flux-dev")
+    assert rep["errors"] == [], rep["errors"]
+    assert rep["templates"] == {"general": ["subject", "action", "setting", "style"]}
+    assert any("not validated" in w for w in rep["warnings"])
+    prof = profiles.set_meta("flux-dev", prompting_status="researched", validated_with="run-1")
+    assert prof["prompting_status"] == "researched" and "cost_guard" not in prof
+    head = (d / "prompting.md").read_text(encoding="utf-8")
+    assert "status: researched" in head and re.search(r"researched_at: \d{4}-\d{2}-\d{2}", head)
+    assert not any("not validated" in w for w in profiles.check("flux-dev")["warnings"])
+
+
+def test_profile_check_requires_inputs_section_for_media_models(tmp_path, kling):
+    _hand_profile(tmp_path, kling, "kling", RESEARCHED)
+    errors = profiles.check("kling")["errors"]
+    assert any("Inputs" in e and "image_url" in e for e in errors)
+    _hand_profile(tmp_path, kling, "kling2", RESEARCHED.replace("## Templates", "## Inputs\n- image_url: 16:9 PNG\n\n## Templates"))
+    assert profiles.check("kling2")["errors"] == []
+
+
+def test_export_refuses_unresearched_profile_and_uses_description(tmp_path, flux):
+    d = _hand_profile(tmp_path, flux)
+    with pytest.raises(FalkitError):
+        export.export("flux-dev", tmp_path / "skills", None, False)
+    (d / "prompting.md").write_text(RESEARCHED, encoding="utf-8")
+    profiles.set_meta("flux-dev", prompting_status="researched")
+    dest = export.export("flux-dev", tmp_path / "skills", None, False, "Blog header images in 16:9 for our team.")
+    text = (dest / "SKILL.md").read_text(encoding="utf-8")
+    assert 'description: "Blog header images in 16:9 for our team."' in text
+    assert "`general`: `subject`, `action`, `setting`; optional `style`" in text and "{{" not in text
+    assert "cost guard" not in text.lower()
 
 
 # --- runner ---------------------------------------------------------------
@@ -142,7 +260,7 @@ def _mock_run(tmp_path: Path, name: str, result: dict) -> dict:
     target = runner.Target("fal-ai/test", {"type": "object", "properties": {}})
     opts = runner.RunOptions(root=tmp_path / "out", label=name, mock_result=result)
     (tmp_path / "out").mkdir(exist_ok=True)
-    return runner.execute(target, runner.Plan(arguments={"prompt": name}), {"usd": 0}, opts)
+    return runner.execute(target, runner.Plan(arguments={"prompt": name}), opts)
 
 
 def test_mock_run_writes_manifest_and_index(tmp_path):
@@ -153,7 +271,7 @@ def test_mock_run_writes_manifest_and_index(tmp_path):
     out = m["outputs"][0]
     assert out["kind"] == "image" and Path(out["local_path"]).read_bytes() == b"\x89PNG fake"
     assert out["local_path"].endswith("images-0.png")
-    idx = (tmp_path / "out" / "index.jsonl").read_text().splitlines()
+    idx = (tmp_path / "out" / "index.jsonl").read_text(encoding="utf-8").splitlines()
     assert json.loads(idx[-1])["run_id"] == m["run_id"]
 
 
@@ -207,8 +325,7 @@ def test_manual_manifest_with_local_only_output(tmp_path):
                 "run_id": "ext-1",
                 "outputs": [{"kind": "image", "local_path": str(img), "url": None}],
             }
-        )
-    )
+        ), encoding="utf-8")
     args = {"image_url": f"from:{mf}"}
     runner.resolve_values(args, runner.Plan(arguments=args), runner.Uploader(dry_run=True), tmp_path)
     assert args["image_url"] == f"<upload:{img}>"
@@ -264,28 +381,18 @@ def _cli(*args: str, env: dict | None = None) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
         env={**os.environ, **(env or {})},
+        encoding="utf-8",
+        errors="replace",
     )
 
 
 def test_cli_profile_from_fixture_and_mock_run(tmp_path, flux):
     # Build a profile by hand from the fixture (profile init needs network).
-    d = tmp_path / "home" / "profiles" / "flux-dev"
-    d.mkdir(parents=True)
-    (d / "schema.json").write_text(json.dumps(flux))
-    (d / "defaults.json").write_text(json.dumps(schema.schema_defaults(flux["input"])))
-    (d / "profile.json").write_text(
-        json.dumps(
-            {
-                "slug": "flux-dev",
-                "endpoint_id": "fal-ai/flux/dev",
-                "pricing": {"unit_price": 0.025, "unit": "megapixels"},
-            }
-        )
-    )
+    _hand_profile(tmp_path, flux, guide=RESEARCHED)
     img = tmp_path / "o.png"
     img.write_bytes(b"png")
     mock = tmp_path / "mock.json"
-    mock.write_text(json.dumps({"images": [{"url": img.as_uri(), "content_type": "image/png"}], "seed": 3}))
+    mock.write_text(json.dumps({"images": [{"url": img.as_uri(), "content_type": "image/png"}], "seed": 3}), encoding="utf-8")
     env = {"FAL_KEY": "", "BWS_ACCESS_TOKEN": "", "FAL_OUTPUT_DIR": str(tmp_path / "out")}
 
     r = _cli("profile", "list", "--json", env=env)
@@ -302,6 +409,26 @@ def test_cli_profile_from_fixture_and_mock_run(tmp_path, flux):
 
     r = _cli("runs", "show", "last", "--json", env=env)
     assert json.loads(r.stdout)["run_id"] == m["run_id"]
+
+    # Templates: rendered into the prompt field, recorded in the manifest, missing slots refused.
+    slots = ["--slot", "subject=a red fox", "--slot", "action=sleeping", "--slot", "setting=in snow"]
+    r = _cli("run", "-p", "flux-dev", "-t", "general", *slots, "--mock", str(mock), "--json", env=env)
+    assert r.returncode == 0, r.stderr
+    m = json.loads(r.stdout)
+    assert m["arguments"]["prompt"] == "Editorial photograph: a red fox, sleeping, in snow. Natural light, true colors."
+    assert m["prompt_template"]["name"] == "general" and "style" not in m["prompt_template"]["slots"]
+    assert m["pricing"]["unit"] == "megapixels" and "cost_estimate" not in m
+    assert "prompting is unresearched" in r.stderr  # the run works, but says the guide isn't vetted
+    r = _cli("run", "-p", "flux-dev", "-t", "general", "--slot", "subject=x", "--dry-run", "--json", env=env)
+    assert r.returncode == 2 and "action" in json.loads(r.stdout)["error"]
+    r = _cli("run", "-p", "flux-dev", "-t", "general", *slots, "--slot", "moood=calm", "--dry-run", "--json", env=env)
+    assert r.returncode == 2 and "moood" in json.loads(r.stdout)["error"]  # a typo never silently drops intent
+    r = _cli("run", "-p", "flux-dev", "-t", "general", *slots, "--slot", "num_images=2", "--dry-run", "--json", env=env)
+    assert r.returncode == 2 or "num_images" not in r.stdout  # parameters are --set, not --slot
+    r = _cli("run", "-p", "flux-dev", "-t", "nope", "--dry-run", "--json", env=env)
+    assert r.returncode == 2 and "general" in json.loads(r.stdout)["hint"]
+    r = _cli("run", "-p", "flux-dev", "--prompt", "x", "--yes", "--max-cost", "5", "--dry-run", "--json", env=env)
+    assert r.returncode == 0 and "ignored" in r.stderr  # retired flags don't break old scripts
 
 
 @pytest.mark.skipif(not os.environ.get("FAL_LIVE"), reason="set FAL_LIVE=1 to run against fal (costs ~$0.003)")
@@ -323,26 +450,66 @@ def test_live_flux_schnell(tmp_path):
     assert Path(m["outputs"][0]["local_path"]).stat().st_size > 1000
 
 
-def test_no_upload_before_cost_guard(tmp_path, kling, monkeypatch):
+def test_no_upload_until_every_request_is_valid(tmp_path, kling, monkeypatch):
     img = tmp_path / "private.png"
     img.write_bytes(b"secret-ish")
     calls = []
     monkeypatch.setattr(runner.Uploader, "_client_", lambda self: calls.append("client") or None)
-    monkeypatch.setattr(runner, "price_for", lambda t: {"unit_price": 0.056, "unit": "seconds"})
     target = runner.Target("fal-ai/kling", kling["input"])
     opts = runner.RunOptions(root=tmp_path / "out")
     with pytest.raises(FalkitError) as e:
         runner.run_many(
             target,
-            [{}],
+            [{}, {"duration": "7"}],  # the second request is invalid
             preset=None,
             sets=[("image_url", "@" + str(img))],
             prompt="x",
             from_refs=[],
             opts=opts,
-            max_cost=0.01,
-            assume_yes=False,
             dry_run=False,
             concurrency=1,
         )
-    assert e.value.code == 3 and calls == []
+    assert e.value.code == 2 and calls == []
+
+
+def test_fetch_refuses_a_run_fal_never_accepted(tmp_path):
+    d = tmp_path / "run"
+    d.mkdir()
+    (d / "request.json").write_text(json.dumps({"run_id": "r", "status": "rejected", "error": "bad duration"}), encoding="utf-8")
+    with pytest.raises(FalkitError) as e:
+        runner.fetch(d, tmp_path, 1)
+    assert e.value.code == 2 and "bad duration" in e.value.hint
+
+
+def test_prompting_stub_matches_the_kind_of_model(tmp_path):
+    cases = {
+        ("text-to-speech", "text"): ["script"],
+        ("image-to-video", "prompt"): ["subject", "action", "setting", "camera_move", "style"],
+        ("text-to-image", "prompt"): ["subject", "action", "setting", "style", "composition", "lighting"],
+        ("image-to-image", None): None,  # background removal: no text input, no template
+    }
+    for (category, field), expected in cases.items():
+        path = tmp_path / f"{category}.md"
+        profiles._write_prompting_stub(path, {"endpoint_id": "x", "category": category, "prompt_field": field})
+        found = templates.parse(path.read_text(encoding="utf-8"))
+        assert (templates.slots(found["general"]) if found else None) == expected, category
+
+
+@pytest.mark.skipif(os.name == "nt", reason="fake bws is a POSIX shell script")
+def test_bws_retries_transient_errors(tmp_path, monkeypatch):
+    from falkit import auth
+
+    counter = tmp_path / "calls"
+    fake = tmp_path / "bws"
+    fake.write_text(
+        "#!/bin/sh\n"
+        f'echo x >> "{counter}"\n'
+        f'if [ "$(wc -l < "{counter}")" -lt 2 ]; then echo "[503 Service Unavailable] upstream" >&2; exit 1; fi\n'
+        """echo '[{"id": "abcdef1234", "key": "FAL_KEY", "value": "k-bws"}]'\n""", encoding="utf-8")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("BWS_ACCESS_TOKEN", "t")
+    monkeypatch.setattr(auth, "_key_cache", None)
+    monkeypatch.setattr(auth.time, "sleep", lambda s: None)
+    assert auth.resolve_key() == "k-bws"
+    assert counter.read_text(encoding="utf-8").count("x") == 2

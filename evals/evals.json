@@ -11,26 +11,27 @@
         "Presented a shortlist of recent text-to-image models ordered newest-first (with dates)",
         "Chose a model and stated its unit price",
         "Saved a reusable model config pinned to 16:9 (landscape_16_9 or aspect_ratio 16:9)",
-        "Wrote a prompt guide containing at least one template with {slot} placeholders",
-        "Prompt guide cites at least 2 source URLs, at least one official (fal.ai or model vendor)",
-        "Generated exactly one test image and saved it locally",
-        "Saved machine-readable run metadata (arguments/seed/url) next to the image",
+        "prompting.md contains a ```template block for the blog-header use case with {slot} placeholders, and its fixed wording applies the model's documented prompt structure (not just '{subject}, {style}')",
+        "prompting.md cites at least 2 source URLs, at least one official (fal.ai or model vendor)",
+        "`fal profile check` passes and the profile is marked researched",
+        "Generated exactly one test image with `fal run --template` (manifest.prompt_template is set) and saved it locally",
+        "Looked at the test image and recorded it as the validation run (validated_with) or explained what to fix",
         "fal API key never appears in any output file"
       ]
     },
     {
       "id": 2,
-      "name": "pipeline-image-to-video-cost-check",
+      "name": "pipeline-image-to-video-confirm-first",
       "prompt": "fal-ai/flux/schnell で「朝焼けの富士山、浮世絵風」の画像を2枚作って、1枚目を fal-ai/kling-video/v2.1/standard/image-to-video で5秒の動画にしたい。動画のほうは高いので、実行前に費用を見せて確認を取って。",
       "expected_output": "Two images generated and saved; the video step prepared with the first image wired in, its cost estimated (~$0.28) and presented for approval instead of being submitted.",
       "files": [],
       "assertions": [
         "Generated two images with flux/schnell and saved both locally",
+        "Created or reused a profile for the video model and researched its input guide before preparing the video step (prompting.md has an Inputs section for image_url)",
         "Did NOT submit the image-to-video job (no video file, no kling request)",
-        "Showed a video cost estimate between $0.25 and $0.35 for 5s",
-        "Prepared the video step with the first image wired as image_url",
+        "Showed the video model's unit price with its unit (per second) and what a 5 s clip implies (about $0.25–$0.35)",
+        "Prepared the video step with the first image wired as image_url and a prompt rendered from a template (--dry-run output or the exact command)",
         "Final message asks the user for approval before running the video",
-        "Saved machine-readable run metadata for the image run",
         "fal API key never appears in any output file"
       ]
     },
@@ -41,12 +42,14 @@
       "expected_output": "A self-contained skill directory under ./.claude/skills with valid SKILL.md frontmatter, bundled profile with square_hd/png defaults, and a runnable script (verified with a dry run).",
       "files": [],
       "assertions": [
+        "Researched the model's input guide before exporting (prompting.md passes `fal profile check`)",
         "Created a skill directory under ./.claude/skills with SKILL.md",
         "SKILL.md frontmatter is valid (name matches dir, lowercase-hyphen, description <=1024 chars)",
+        "The description was written for the team's use (passed with --description), not only the generic category sentence",
         "Defaults set to square and PNG in the skill's config",
+        "SKILL.md lists the profile's templates and tells the agent to run with --template",
         "Skill is self-contained (no references to paths outside its own directory)",
         "Skill was verified to run (dry-run or a real generation)",
-        "Skill documents how to provide the fal key without embedding it",
         "fal API key never appears in any output file"
       ]
     },
@@ -74,14 +77,89 @@
       "expected_output": "The sprite-sheet workflow used end to end: profiles created for the sheet and cutout models, one sheet with 6 separated items generated and checked, background removed, split into 6 transparent PNGs with --expect 6 and recorded with fal ingest, then the workflow exported as a standalone skill that passes its own `workflow plan`.",
       "files": [],
       "assertions": [
+        "Asked for or inferred the direction (assets, style, size per asset, repeat use) before building",
         "Used a workflow (fal workflow init --example sprite-sheet or equivalent workflow.json) rather than ad-hoc one-off commands only",
-        "Workflow steps reference profiles, not raw endpoint ids",
+        "Workflow steps reference profiles, not raw endpoint ids, and the sheet step names a template",
+        "The sheet prompt was rendered from the template with the six items in item_list (manifest.prompt_template.slots)",
         "Generated a single sheet containing all 6 items, and inspected it before running background removal",
-        "Ran background removal on the sheet with the output of the sheet step wired in (--from label:… or from:REF)",
+        "Either confirmed the sheet came back transparent and skipped the optional cutout, or ran background removal with the sheet wired in (--from label:…)",
         "Produced exactly 6 separate PNG files with transparent backgrounds",
         "Recorded the split pieces with fal ingest so they have a manifest",
-        "Exported a standalone skill directory containing SKILL.md, workflow.json, bundled profiles and the split script",
-        "Total spend stayed under $0.50 and no step was run with --yes without the user's approval",
+        "Exported a standalone skill directory containing SKILL.md, workflow.json, bundled researched profiles (gpt-image, remove-bg) and the split script",
+        "fal API key never appears in any output file"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "one-off-endpoint-still-researched",
+      "prompt": "fal-ai/recraft/v3/text-to-image で「HAPPY HOUR 5-7PM」と大きく書かれたバーのポスターを1枚作って。今回だけでいいよ。",
+      "expected_output": "A quick-pass input guide for the model (typography rules from official docs), a template-rendered prompt that quotes the on-screen text the way the model's docs recommend, one image checked for the text.",
+      "files": [],
+      "assertions": [
+        "Did not skip research because the request is one-off: read the fal model page and the maker's guidance on rendering text",
+        "Created a profile and a prompting.md that passes `fal profile check` (quick pass is fine)",
+        "The prompt handles the on-screen text as the docs recommend (e.g. quoted exactly), and was rendered with --template",
+        "Generated exactly one image and checked that the text 'HAPPY HOUR 5-7PM' is legible and spelled correctly, reporting any error honestly",
+        "fal API key never appears in any output file"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "speech-model-prompt-field",
+      "prompt": "fal の音声合成モデルで、「本日はご来場いただきありがとうございます。」を落ち着いた女性の声で読み上げた音声を作って。日本語に対応しているモデルを選んでね。",
+      "expected_output": "A TTS model whose docs confirm Japanese support, a profile whose prompt field is the model's text field, a narration template, one audio file.",
+      "files": [],
+      "assertions": [
+        "Chose a model whose documentation or schema confirms Japanese support, and said where that is stated",
+        "The profile's prompt_field is the model's text input (not a stray 'prompt' key); the run passed schema validation",
+        "Voice or style parameters were set from the model's documented options, not guessed",
+        "Produced one audio file and reported its duration from the manifest",
+        "fal API key never appears in any output file"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "design-workflow-from-direction",
+      "prompt": "ECサイトの商品写真（白背景の静止画）から、SNS用の縦型5秒の紹介動画を毎週10本くらい作ってる。これを毎回同じ品質で回せるskillにしたい。まずは設計を提案して。まだ生成はしないで。",
+      "expected_output": "Questions or stated assumptions about the direction, then a numbered design (steps, model per step with reason, local steps, review points, consistency strategy) that names profiles and templates, with no generation.",
+      "files": [],
+      "assertions": [
+        "Clarified or stated assumptions for what varies (product, copy) and what stays fixed (brand style, length, aspect ratio)",
+        "Proposed a numbered step design where each model step names a candidate model with a reason checked against its schema (9:16, 5 s, image input)",
+        "Put a cheap checkable step (e.g. keyframe or background preparation) before the expensive video step, with a review or check point",
+        "Said that each model step will use a researched profile and a named template, and which profiles need research",
+        "Mentioned the unit prices of the video step and what ~10 clips a week implies",
+        "Did not submit any generation request",
+        "fal API key never appears in any output file"
+      ]
+    },
+    {
+      "id": 9,
+      "name": "gpt-image-medium-product-and-price",
+      "prompt": "gpt-image-2.5 sunburst の medium 品質で、白いスニーカーの商品写真を16:9で2枚作って。1枚いくらかも教えて。",
+      "expected_output": "A gpt-image profile seeded from the bundled guide, quality medium, a real 16:9 custom size (1920x1088), the product-shot template, 2 images, and the per-image price from the researched table (~$0.0103).",
+      "files": [],
+      "assertions": [
+        "Created or reused the profile from the bundled guide (profile.json guide_source is bundled) and it is researched",
+        "Ran with quality=medium and a real 16:9 size ({width:1920,height:1088} or similar multiple-of-16 size), not the 1088x608 landscape_16_9 preset",
+        "Used the product-shot template with English slot values (manifest.prompt_template)",
+        "Reported the price per image from the researched table (about $0.0103 at medium 1920x1088), not '$1 per unit'",
+        "Checked both images against the request before reporting",
+        "fal API key never appears in any output file"
+      ]
+    },
+    {
+      "id": 10,
+      "name": "h3-max-from-keyframe-confirm",
+      "prompt": "さっき作ったスニーカーの1枚目を、minimax h3 max で10秒・1080Pの動画にしたい。回り込むカメラで、足音とストリートの環境音。実行前に金額を見せて。",
+      "expected_output": "An h3-max-i2v profile from the bundled guide, the product-reveal or animate template, the first image wired as image_url only, prompt_expansion_mode disabled, and a price of about $1.60 shown before any submission.",
+      "files": [],
+      "assertions": [
+        "Wired only the first image into image_url (end_image_url stays empty)",
+        "Rendered the prompt from the H3 guide's template with a named camera move (orbit) and a sound direction",
+        "duration=10 and resolution=1080P were set with --set (not as template slots) and the prompt's length matches",
+        "Showed the price from the researched table (about $1.60 for 10 s at 1080P) and asked for approval before running",
+        "Did not submit the video before approval",
         "fal API key never appears in any output file"
       ]
     }

@@ -139,11 +139,14 @@ def media_kind_of_field(name: str, prop: dict | None = None) -> str | None:
         urlish = fmt in {"uri", "url", "binary"}
     if not urlish:
         return None
+    # An explicit medium in the name wins over generic words: `reference_video_urls` is video, not image,
+    # even though "reference" usually means a reference image.
     for kind, needles in (
-        ("image", ("image", "mask", "photo", "face", "style", "reference", "frame", "logo")),
+        ("image", ("image", "photo", "mask", "logo")),
         ("video", ("video", "clip", "footage")),
         ("audio", ("audio", "voice", "speech", "music", "sound", "song")),
         ("3d", ("mesh", "glb", "model_3d", "3d")),
+        ("image", ("face", "style", "reference", "frame")),
     ):
         if any(x in n for x in needles):
             return kind
@@ -152,6 +155,19 @@ def media_kind_of_field(name: str, prop: dict | None = None) -> str | None:
 
 def is_list_field(prop: dict) -> bool:
     return "array" in _types(prop)
+
+
+# Where a model takes its main text input. Most use `prompt`; speech and music models often don't.
+_PROMPT_FIELDS = ("prompt", "text", "gen_text", "text_prompt", "script", "lyrics", "input")
+
+
+def prompt_field(input_schema: dict) -> str | None:
+    """The string field that `--prompt` and `--template` fill, or None when the model takes no text."""
+    props = input_schema.get("properties") or {}
+    for name in _PROMPT_FIELDS:
+        if name in props and "string" in (_types(props[name]) or ["string"]):
+            return name
+    return None
 
 
 def summarize(input_schema: dict) -> list[dict]:
@@ -220,12 +236,14 @@ def coerce_cli_value(name: str, value: Any, input_schema: dict) -> Any:
 def schema_defaults(input_schema: dict) -> dict:
     """Defaults worth pinning in a profile (reproducibility across upstream default changes).
 
-    Skips seeds (pinning one kills variety) and sync_mode (we always want URLs
-    back, not base64 blobs in the result).
+    Skips seeds (pinning one kills variety), sync_mode (we always want URLs
+    back, not base64 blobs in the result), and the prompt field (a default
+    prompt would silently stand in for a missing one).
     """
     out = {}
+    skip = {"seed", "sync_mode", prompt_field(input_schema)}
     for name, prop in ordered_properties(input_schema):
-        if name in {"seed", "sync_mode"} or "default" not in prop or prop["default"] is None:
+        if name in skip or "default" not in prop or prop["default"] is None:
             continue
         out[name] = prop["default"]
     return out

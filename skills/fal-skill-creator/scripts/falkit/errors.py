@@ -6,7 +6,7 @@ from __future__ import annotations
 EXIT_OK = 0
 EXIT_ERROR = 1  # unexpected failure
 EXIT_USAGE = 2  # bad arguments / schema validation failed
-EXIT_NEEDS_CONFIRMATION = 3  # cost guard tripped; rerun with --yes after asking the user
+# 3 is retired (it was the cost guard until 1.2) and stays unused, so the other codes keep their meaning.
 EXIT_AUTH = 4  # no key / key rejected
 EXIT_API = 5  # fal returned an error for the request
 EXIT_TIMEOUT = 6  # still running at --timeout; resumable with `fetch`
