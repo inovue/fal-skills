@@ -25,8 +25,8 @@ sys.path.insert(0, str(SCRIPTS))
 from falkit import pricing, profiles, runner, schema, templates  # noqa: E402
 from falkit.core import FalkitError  # noqa: E402
 
-INDEX = json.loads((GUIDES / "index.json").read_text())["guides"]
-FIXTURES = {json.loads(p.read_text())["endpoint_id"]: p for p in FIX.glob("schema-*.json")}
+INDEX = json.loads((GUIDES / "index.json").read_text(encoding="utf-8"))["guides"]
+FIXTURES = {json.loads(p.read_text(encoding="utf-8"))["endpoint_id"]: p for p in FIX.glob("schema-*.json")}
 
 
 @pytest.fixture(autouse=True)
@@ -40,20 +40,20 @@ def isolated(tmp_path, monkeypatch):
 
 
 def _profile_from(endpoint: str, guide_text: str | None = None, slug: str | None = None) -> Path:
-    compact = json.loads(FIXTURES[endpoint].read_text())
+    compact = json.loads(FIXTURES[endpoint].read_text(encoding="utf-8"))
     entry = INDEX.get(endpoint, {})
     slug = slug or entry.get("slug") or profiles.slugify(endpoint)
     d = profiles.user_dir() / slug
     d.mkdir(parents=True)
-    (d / "schema.json").write_text(json.dumps(compact))
-    (d / "defaults.json").write_text(json.dumps({**schema.schema_defaults(compact["input"]), **entry.get("recommend", {})}))
-    (d / "presets.json").write_text(json.dumps(entry.get("presets") or {}))
-    (d / "prompting.md").write_text(guide_text if guide_text is not None else (GUIDES / entry["file"]).read_text())
+    (d / "schema.json").write_text(json.dumps(compact), encoding="utf-8")
+    (d / "defaults.json").write_text(json.dumps({**schema.schema_defaults(compact["input"]), **entry.get("recommend", {})}), encoding="utf-8")
+    (d / "presets.json").write_text(json.dumps(entry.get("presets") or {}), encoding="utf-8")
+    (d / "prompting.md").write_text(guide_text if guide_text is not None else (GUIDES / entry["file"]).read_text(), encoding="utf-8")
     (d / "profile.json").write_text(json.dumps({
         "slug": slug, "endpoint_id": endpoint, "category": compact["category"], "path": str(d),
         "prompt_field": schema.prompt_field(compact["input"]), "prompting_status": "researched",
         "pricing": {"unit_price": 1, "unit": "units"},
-    }))
+    }), encoding="utf-8")
     return d
 
 
@@ -72,7 +72,7 @@ def test_every_index_entry_points_at_a_file_and_real_presets():
     for endpoint, entry in INDEX.items():
         assert (GUIDES / entry["file"]).exists(), endpoint
         if endpoint in FIXTURES:
-            props = json.loads(FIXTURES[endpoint].read_text())["input"]["properties"]
+            props = json.loads(FIXTURES[endpoint].read_text(encoding="utf-8"))["input"]["properties"]
             for name, preset in (entry.get("presets") or {}).items():
                 assert set(preset) <= set(props), (endpoint, name)
             assert set(entry.get("recommend") or {}) <= set(props), endpoint
@@ -81,7 +81,7 @@ def test_every_index_entry_points_at_a_file_and_real_presets():
 def test_guide_prices_match_the_model_pages():
     gi = _profile_from("openai/gpt-image-2.5/sunburst/text-to-image")
     t = pricing.load(gi)
-    s = json.loads(FIXTURES["openai/gpt-image-2.5/sunburst/text-to-image"].read_text())["input"]
+    s = json.loads(FIXTURES["openai/gpt-image-2.5/sunburst/text-to-image"].read_text(encoding="utf-8"))["input"]
     assert pricing.estimate(t, {"quality": "medium", "image_size": "square_hd"}, s)["usd"] == 0.01317
     hero = {"quality": "medium", "image_size": {"width": 1920, "height": 1088}}
     assert pricing.estimate(t, hero, s)["usd"] == 0.01029
@@ -90,7 +90,7 @@ def test_guide_prices_match_the_model_pages():
 
     h3 = _profile_from("minimax/h3-max/image-to-video")
     t = pricing.load(h3)
-    s = json.loads(FIXTURES["minimax/h3-max/image-to-video"].read_text())["input"]
+    s = json.loads(FIXTURES["minimax/h3-max/image-to-video"].read_text(encoding="utf-8"))["input"]
     assert pricing.estimate(t, {"resolution": "1080P", "duration": 10}, s)["usd"] == 1.6
     assert pricing.estimate(t, {}, s)["usd"] == 0.4  # schema defaults: 768P, 5 s
 
@@ -169,7 +169,7 @@ def _mock(tmp_path: Path, label: str, n_images: int) -> None:
 
 def test_one_from_fills_one_input(tmp_path):
     """A two-variant image run must not become the H3 start frame *and* end frame."""
-    h3 = json.loads(FIXTURES["minimax/h3-max/image-to-video"].read_text())["input"]
+    h3 = json.loads(FIXTURES["minimax/h3-max/image-to-video"].read_text(encoding="utf-8"))["input"]
     target = runner.Target("minimax/h3-max/image-to-video", h3)
     _mock(tmp_path, "variants", 2)
     _mock(tmp_path, "end", 1)
@@ -183,7 +183,7 @@ def test_one_from_fills_one_input(tmp_path):
     assert plan.arguments["image_url"].endswith("variants-1.png")  # the chosen variant is the start frame
     assert plan.arguments["end_image_url"].endswith("end-0.png") and len(plan.wiring) == 2
 
-    edit = json.loads(FIXTURES["openai/gpt-image-2.5/sunburst/edit"].read_text())["input"]
+    edit = json.loads(FIXTURES["openai/gpt-image-2.5/sunburst/edit"].read_text(encoding="utf-8"))["input"]
     t2 = runner.Target("openai/gpt-image-2.5/sunburst/edit", edit)
     plan = runner.Plan(arguments={"prompt": "x"})
     runner.autowire(plan.arguments, t2, ["label:variants"], plan, up, root)
@@ -227,13 +227,13 @@ def test_research_check_rejects_a_fake_guide(monkeypatch):
     for needle in ("almost only slots", "fal's model page", "pricing"):
         assert needle in errors, needle
     monkeypatch.setattr(profiles, "url_status", lambda url: 404)
-    guide = (GUIDES / "gpt-image-2.5-text-to-image.md").read_text()
+    guide = (GUIDES / "gpt-image-2.5-text-to-image.md").read_text(encoding="utf-8")
     d = _profile_from("openai/gpt-image-2.5/sunburst/text-to-image", guide, slug="dead-links")
     assert any("source doesn't exist (404)" in e for e in profiles.check(str(d), online=True)["errors"])
 
 
 def test_research_check_requires_prompt_rewriting_to_be_addressed():
-    guide = (GUIDES / "h3-max-image-to-video.md").read_text().replace("prompt_expansion_mode", "the expansion setting")
+    guide = (GUIDES / "h3-max-image-to-video.md").read_text(encoding="utf-8").replace("prompt_expansion_mode", "the expansion setting")
     d = _profile_from("minimax/h3-max/image-to-video", guide, slug="h3-no-expansion")
     assert any("prompt_expansion_mode" in e for e in profiles.check(str(d))["errors"])
 
@@ -241,7 +241,7 @@ def test_research_check_requires_prompt_rewriting_to_be_addressed():
 # --- CLI: validation must name a real run of this profile -----------------------------------------------
 def _cli(*args: str, env: dict) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, str(SCRIPTS / "fal.py"), *args], capture_output=True, text=True,
-                          env={**os.environ, **env})
+                          env={**os.environ, **env}, encoding="utf-8", errors="replace")
 
 
 def test_validated_with_must_be_a_templated_run_of_this_profile(tmp_path):
@@ -249,7 +249,7 @@ def test_validated_with_must_be_a_templated_run_of_this_profile(tmp_path):
     img = tmp_path / "o.png"
     Image.new("RGB", (8, 8)).save(img)
     mock = tmp_path / "mock.json"
-    mock.write_text(json.dumps({"images": [{"url": img.as_uri(), "content_type": "image/png"}]}))
+    mock.write_text(json.dumps({"images": [{"url": img.as_uri(), "content_type": "image/png"}]}), encoding="utf-8")
     env = {"FAL_KEY": "", "BWS_ACCESS_TOKEN": "", "FAL_OUTPUT_DIR": str(tmp_path / "out"),
            "FAL_SKILLS_HOME": str(tmp_path / "home"), "XDG_CACHE_HOME": str(tmp_path / "cache")}
     r = _cli("run", "-p", "gpt-image", "--prompt", "a fox", "--mock", str(mock), "--label", "plain", env=env)
@@ -280,28 +280,28 @@ def test_every_bundled_template_renders_cleanly_both_ways():
     for endpoint, entry in INDEX.items():
         if endpoint not in FIXTURES:
             continue
-        props = set(json.loads(FIXTURES[endpoint].read_text())["input"]["properties"])
-        for name, body in templates.parse((GUIDES / entry["file"]).read_text()).items():
+        props = set(json.loads(FIXTURES[endpoint].read_text(encoding="utf-8"))["input"]["properties"])
+        for name, body in templates.parse((GUIDES / entry["file"]).read_text(encoding="utf-8")).items():
             assert templates.lint(body, props) == [], (entry["file"], name)
 
 
 def test_quick_templates_are_short():
     for entry in INDEX.values():
-        found = templates.parse((GUIDES / entry["file"]).read_text())
+        found = templates.parse((GUIDES / entry["file"]).read_text(encoding="utf-8"))
         if found:  # prompted models ship a `quick` template with at most 3 required slots
             assert "quick" in found and len(templates.required_slots(found["quick"])) <= 3, entry["file"]
 
 
 def test_lower_bound_prices_say_so():
     d = _profile_from("openai/gpt-image-2.5/sunburst/edit")
-    s = json.loads(FIXTURES["openai/gpt-image-2.5/sunburst/edit"].read_text())["input"]
+    s = json.loads(FIXTURES["openai/gpt-image-2.5/sunburst/edit"].read_text(encoding="utf-8"))["input"]
     est = pricing.estimate(pricing.load(d), {"quality": "medium", "image_size": "auto"}, s)
     assert pricing.describe(est).startswith("≥ $0.0132")
 
 
 def test_profile_init_seeds_from_the_library(monkeypatch):
     endpoint = "openai/gpt-image-2.5/sunburst/text-to-image"
-    compact = json.loads(FIXTURES[endpoint].read_text())
+    compact = json.loads(FIXTURES[endpoint].read_text(encoding="utf-8"))
     monkeypatch.setattr(profiles.schema, "fetch_openapi", lambda e: {"paths": {}})
     monkeypatch.setattr(profiles.schema, "compact", lambda doc, e: compact)
     monkeypatch.setattr(profiles.catalog, "get_model", lambda e: None)
@@ -311,7 +311,7 @@ def test_profile_init_seeds_from_the_library(monkeypatch):
     assert d.name == "gpt-image" and prof["prompting_status"] == "researched"
     assert prof["defaults"]["quality"] == "medium"  # the researched default, not fal's 4x pricier `high`
     assert "hero" in prof["presets"] and prof["validated_with"].startswith("bundled: 2026-09-30")
-    assert "status: researched" in (d / "prompting.md").read_text()
+    assert "status: researched" in (d / "prompting.md").read_text(encoding="utf-8")
     assert profiles.check("gpt-image")["warnings"] == []
 
 

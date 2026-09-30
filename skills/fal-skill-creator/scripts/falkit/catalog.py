@@ -56,7 +56,7 @@ def load_catalog(refresh: bool = False) -> list[dict]:
     path = cache_dir() / "models.json"
     if not refresh and path.exists():
         try:
-            cached = json.loads(path.read_text())
+            cached = json.loads(path.read_text(encoding="utf-8"))
             if time.time() - cached["fetched_at"] < CACHE_TTL_S:
                 return cached["models"]
         except (json.JSONDecodeError, KeyError):

@@ -26,13 +26,13 @@ from falkit.core import FalkitError, parse_assignment, set_path  # noqa: E402
 
 @pytest.fixture
 def flux() -> dict:
-    return schema.compact(json.loads((FIX / "openapi-flux-dev.json").read_text()), "fal-ai/flux/dev")
+    return schema.compact(json.loads((FIX / "openapi-flux-dev.json").read_text(encoding="utf-8")), "fal-ai/flux/dev")
 
 
 @pytest.fixture
 def kling() -> dict:
     ep = "fal-ai/kling-video/v2.1/standard/image-to-video"
-    return schema.compact(json.loads((FIX / "openapi-kling-i2v.json").read_text()), ep)
+    return schema.compact(json.loads((FIX / "openapi-kling-i2v.json").read_text(encoding="utf-8")), ep)
 
 
 @pytest.fixture(autouse=True)
@@ -174,8 +174,8 @@ Editorial photograph: {subject}, {action}, {setting}. Natural light, true colors
 def _hand_profile(tmp_path: Path, compact: dict, slug: str = "flux-dev", guide: str | None = None) -> Path:
     d = tmp_path / "home" / "profiles" / slug
     d.mkdir(parents=True)
-    (d / "schema.json").write_text(json.dumps(compact))
-    (d / "defaults.json").write_text(json.dumps(schema.schema_defaults(compact["input"])))
+    (d / "schema.json").write_text(json.dumps(compact), encoding="utf-8")
+    (d / "defaults.json").write_text(json.dumps(schema.schema_defaults(compact["input"])), encoding="utf-8")
     (d / "profile.json").write_text(
         json.dumps(
             {
@@ -186,10 +186,9 @@ def _hand_profile(tmp_path: Path, compact: dict, slug: str = "flux-dev", guide: 
                 "pricing": {"unit_price": 0.025, "unit": "megapixels"},
                 "prompting_status": "unresearched",
             }
-        )
-    )
-    stub = (SCRIPTS.parent / "assets" / "prompting.template.md").read_text()
-    (d / "prompting.md").write_text(guide if guide is not None else stub)
+        ), encoding="utf-8")
+    stub = (SCRIPTS.parent / "assets" / "prompting.template.md").read_text(encoding="utf-8")
+    (d / "prompting.md").write_text(guide if guide is not None else stub, encoding="utf-8")
     return d
 
 
@@ -202,14 +201,14 @@ def test_profile_check_gates_researched_status(tmp_path, flux):
         profiles.set_meta("flux-dev", prompting_status="researched")
     assert e.value.code == 2
 
-    (d / "prompting.md").write_text(RESEARCHED)
+    (d / "prompting.md").write_text(RESEARCHED, encoding="utf-8")
     rep = profiles.check("flux-dev")
     assert rep["errors"] == [], rep["errors"]
     assert rep["templates"] == {"general": ["subject", "action", "setting", "style"]}
     assert any("not validated" in w for w in rep["warnings"])
     prof = profiles.set_meta("flux-dev", prompting_status="researched", validated_with="run-1")
     assert prof["prompting_status"] == "researched" and "cost_guard" not in prof
-    head = (d / "prompting.md").read_text()
+    head = (d / "prompting.md").read_text(encoding="utf-8")
     assert "status: researched" in head and re.search(r"researched_at: \d{4}-\d{2}-\d{2}", head)
     assert not any("not validated" in w for w in profiles.check("flux-dev")["warnings"])
 
@@ -226,10 +225,10 @@ def test_export_refuses_unresearched_profile_and_uses_description(tmp_path, flux
     d = _hand_profile(tmp_path, flux)
     with pytest.raises(FalkitError):
         export.export("flux-dev", tmp_path / "skills", None, False)
-    (d / "prompting.md").write_text(RESEARCHED)
+    (d / "prompting.md").write_text(RESEARCHED, encoding="utf-8")
     profiles.set_meta("flux-dev", prompting_status="researched")
     dest = export.export("flux-dev", tmp_path / "skills", None, False, "Blog header images in 16:9 for our team.")
-    text = (dest / "SKILL.md").read_text()
+    text = (dest / "SKILL.md").read_text(encoding="utf-8")
     assert 'description: "Blog header images in 16:9 for our team."' in text
     assert "`general`: `subject`, `action`, `setting`; optional `style`" in text and "{{" not in text
     assert "cost guard" not in text.lower()
@@ -272,7 +271,7 @@ def test_mock_run_writes_manifest_and_index(tmp_path):
     out = m["outputs"][0]
     assert out["kind"] == "image" and Path(out["local_path"]).read_bytes() == b"\x89PNG fake"
     assert out["local_path"].endswith("images-0.png")
-    idx = (tmp_path / "out" / "index.jsonl").read_text().splitlines()
+    idx = (tmp_path / "out" / "index.jsonl").read_text(encoding="utf-8").splitlines()
     assert json.loads(idx[-1])["run_id"] == m["run_id"]
 
 
@@ -326,8 +325,7 @@ def test_manual_manifest_with_local_only_output(tmp_path):
                 "run_id": "ext-1",
                 "outputs": [{"kind": "image", "local_path": str(img), "url": None}],
             }
-        )
-    )
+        ), encoding="utf-8")
     args = {"image_url": f"from:{mf}"}
     runner.resolve_values(args, runner.Plan(arguments=args), runner.Uploader(dry_run=True), tmp_path)
     assert args["image_url"] == f"<upload:{img}>"
@@ -383,6 +381,8 @@ def _cli(*args: str, env: dict | None = None) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
         env={**os.environ, **(env or {})},
+        encoding="utf-8",
+        errors="replace",
     )
 
 
@@ -392,7 +392,7 @@ def test_cli_profile_from_fixture_and_mock_run(tmp_path, flux):
     img = tmp_path / "o.png"
     img.write_bytes(b"png")
     mock = tmp_path / "mock.json"
-    mock.write_text(json.dumps({"images": [{"url": img.as_uri(), "content_type": "image/png"}], "seed": 3}))
+    mock.write_text(json.dumps({"images": [{"url": img.as_uri(), "content_type": "image/png"}], "seed": 3}), encoding="utf-8")
     env = {"FAL_KEY": "", "BWS_ACCESS_TOKEN": "", "FAL_OUTPUT_DIR": str(tmp_path / "out")}
 
     r = _cli("profile", "list", "--json", env=env)
@@ -475,7 +475,7 @@ def test_no_upload_until_every_request_is_valid(tmp_path, kling, monkeypatch):
 def test_fetch_refuses_a_run_fal_never_accepted(tmp_path):
     d = tmp_path / "run"
     d.mkdir()
-    (d / "request.json").write_text(json.dumps({"run_id": "r", "status": "rejected", "error": "bad duration"}))
+    (d / "request.json").write_text(json.dumps({"run_id": "r", "status": "rejected", "error": "bad duration"}), encoding="utf-8")
     with pytest.raises(FalkitError) as e:
         runner.fetch(d, tmp_path, 1)
     assert e.value.code == 2 and "bad duration" in e.value.hint
@@ -491,7 +491,7 @@ def test_prompting_stub_matches_the_kind_of_model(tmp_path):
     for (category, field), expected in cases.items():
         path = tmp_path / f"{category}.md"
         profiles._write_prompting_stub(path, {"endpoint_id": "x", "category": category, "prompt_field": field})
-        found = templates.parse(path.read_text())
+        found = templates.parse(path.read_text(encoding="utf-8"))
         assert (templates.slots(found["general"]) if found else None) == expected, category
 
 
@@ -505,12 +505,11 @@ def test_bws_retries_transient_errors(tmp_path, monkeypatch):
         "#!/bin/sh\n"
         f'echo x >> "{counter}"\n'
         f'if [ "$(wc -l < "{counter}")" -lt 2 ]; then echo "[503 Service Unavailable] upstream" >&2; exit 1; fi\n'
-        """echo '[{"id": "abcdef1234", "key": "FAL_KEY", "value": "k-bws"}]'\n"""
-    )
+        """echo '[{"id": "abcdef1234", "key": "FAL_KEY", "value": "k-bws"}]'\n""", encoding="utf-8")
     fake.chmod(0o755)
     monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("BWS_ACCESS_TOKEN", "t")
     monkeypatch.setattr(auth, "_key_cache", None)
     monkeypatch.setattr(auth.time, "sleep", lambda s: None)
     assert auth.resolve_key() == "k-bws"
-    assert counter.read_text().count("x") == 2
+    assert counter.read_text(encoding="utf-8").count("x") == 2

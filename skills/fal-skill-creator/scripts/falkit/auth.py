@@ -33,6 +33,8 @@ def _bws_json(args: list[str], timeout: float = 60, attempts: int = 3) -> Any:
                 text=True,
                 timeout=timeout,
                 env=os.environ.copy(),
+                encoding="utf-8",
+                errors="replace",
             )
         except subprocess.TimeoutExpired as e:
             raise FalkitError("bws timed out", EXIT_AUTH) from e

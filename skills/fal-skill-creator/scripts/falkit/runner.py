@@ -572,7 +572,7 @@ def probe_media(path: Path, kind: str) -> dict:
         proc = subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,width,height,r_frame_rate:format=duration",
              "-of", "json", str(path)],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, timeout=30, encoding="utf-8", errors="replace",
         )
         info = json.loads(proc.stdout or "{}")
     except (subprocess.SubprocessError, OSError, ValueError):

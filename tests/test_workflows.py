@@ -37,17 +37,16 @@ def isolated(tmp_path, monkeypatch):
 
 
 def _compact(name: str, endpoint: str) -> dict:
-    return schema.compact(json.loads((FIX / name).read_text()), endpoint)
+    return schema.compact(json.loads((FIX / name).read_text(encoding="utf-8")), endpoint)
 
 
 def _profile(slug: str, compact: dict, pricing: dict, base: Path | None = None, status: str = "researched") -> Path:
     d = (base or profiles.user_dir()) / slug
     d.mkdir(parents=True)
-    (d / "schema.json").write_text(json.dumps(compact))
-    (d / "defaults.json").write_text(json.dumps(schema.schema_defaults(compact["input"])))
+    (d / "schema.json").write_text(json.dumps(compact), encoding="utf-8")
+    (d / "defaults.json").write_text(json.dumps(schema.schema_defaults(compact["input"])), encoding="utf-8")
     (d / "profile.json").write_text(
-        json.dumps({"slug": slug, "endpoint_id": compact["endpoint_id"], "pricing": pricing, "prompting_status": status})
-    )
+        json.dumps({"slug": slug, "endpoint_id": compact["endpoint_id"], "pricing": pricing, "prompting_status": status}), encoding="utf-8")
     return d
 
 
@@ -56,19 +55,19 @@ GUIDES = SKILL / "assets" / "guides"
 
 def _real_profile(slug: str, status: str = "researched", base: Path | None = None) -> Path:
     """A profile built from a live schema fixture and its bundled guide, as `profile init` would make it."""
-    compact = json.loads((FIX / f"schema-{slug}.json").read_text())
-    entry = json.loads((GUIDES / "index.json").read_text())["guides"][compact["endpoint_id"]]
+    compact = json.loads((FIX / f"schema-{slug}.json").read_text(encoding="utf-8"))
+    entry = json.loads((GUIDES / "index.json").read_text(encoding="utf-8"))["guides"][compact["endpoint_id"]]
     d = (base or profiles.user_dir()) / slug
     d.mkdir(parents=True)
-    (d / "schema.json").write_text(json.dumps(compact))
-    (d / "defaults.json").write_text(json.dumps({**schema.schema_defaults(compact["input"]), **entry.get("recommend", {})}))
-    (d / "presets.json").write_text(json.dumps(entry.get("presets") or {}))
-    (d / "prompting.md").write_text((GUIDES / entry["file"]).read_text())
+    (d / "schema.json").write_text(json.dumps(compact), encoding="utf-8")
+    (d / "defaults.json").write_text(json.dumps({**schema.schema_defaults(compact["input"]), **entry.get("recommend", {})}), encoding="utf-8")
+    (d / "presets.json").write_text(json.dumps(entry.get("presets") or {}), encoding="utf-8")
+    (d / "prompting.md").write_text((GUIDES / entry["file"]).read_text(), encoding="utf-8")
     (d / "profile.json").write_text(json.dumps({
         "slug": slug, "endpoint_id": compact["endpoint_id"], "category": compact["category"],
         "prompt_field": schema.prompt_field(compact["input"]), "prompting_status": status,
         "pricing": {"unit_price": 1, "unit": "units"},
-    }))
+    }), encoding="utf-8")
     return d
 
 
@@ -115,7 +114,7 @@ def test_label_refs_and_ingest_feed_autowire(tmp_path):
     work = tmp_path / "work"
     work.mkdir()
     _sheet(work / "piece.png")
-    (work / ".hidden").write_text("skip me")
+    (work / ".hidden").write_text("skip me", encoding="utf-8")
     m = runner.ingest([work], root, "wf.split", ["label:wf.a"], note="split", move=True)
     out = m["outputs"]
     assert len(out) == 1 and out[0]["kind"] == "image" and out[0]["url"] is None
@@ -199,7 +198,7 @@ def test_workflow_check_plan_lineage_and_export(tmp_path):
     split = p["steps"][2]
     assert "blocked_by" not in split and "images-0.png" in split["command"]
     assert "--parent label:icons.sheet" in split["then"]
-    r = subprocess.run(split["command"].replace("uv run ", f"{sys.executable} ", 1), shell=True, capture_output=True, text=True)
+    r = subprocess.run(split["command"].replace("uv run ", f"{sys.executable} ", 1), shell=True, capture_output=True, text=True, encoding="utf-8", errors="replace")
     assert r.returncode == 0, r.stderr
     assert json.loads(r.stdout)["count"] == 6
     runner.ingest([Path(split["work_dir"])], root, "icons.split", ["label:icons.sheet"], move=True)
@@ -222,7 +221,7 @@ def test_workflow_check_plan_lineage_and_export(tmp_path):
                 "scripts/split_sprites.py", "profiles/gpt-image/prompting.md", "profiles/remove-bg/profile.json",
                 "references/pipelines.md"):
         assert (dest / rel).exists(), rel
-    text = (dest / "SKILL.md").read_text()
+    text = (dest / "SKILL.md").read_text(encoding="utf-8")
     m = re.match(r"^---\nname: (.+)\ndescription: \"(.+?)\"\n", text)
     assert m and m.group(1) == "fal-icons" and 0 < len(m.group(2)) <= 1024
     assert "{{" not in text and "## Running the steps" in text and "```template sheet" in text
@@ -248,13 +247,13 @@ def test_keyframe_to_video_example_checks_and_plans(tmp_path):
 
 def test_workflow_check_catches_structural_errors(tmp_path):
     d = workflows.init("bad", "user", None, False)
-    wf = json.loads((d / "workflow.json").read_text())
+    wf = json.loads((d / "workflow.json").read_text(encoding="utf-8"))
     wf["steps"] = [
         {"id": "a", "type": "review"},
         {"id": "b", "type": "local", "command": "python scripts/missing.py {in:zzz}", "from": ["a"]},
         {"id": "B", "type": "magic"},
     ]
-    (d / "workflow.json").write_text(json.dumps(wf))
+    (d / "workflow.json").write_text(json.dumps(wf), encoding="utf-8")
     errors = "\n".join(workflows.check("bad")["errors"])
     for needle in ("description is empty", "review step 'a'", "scripts/missing.py", "{in:zzz}", "id must be", "type must be"):
         assert needle in errors, needle
@@ -270,22 +269,22 @@ def test_workflow_export_needs_researched_templated_steps(tmp_path):
         workflows.export("icons", tmp_path / "skills", None, False)
     assert "unresearched" in str(e.value)
 
-    wf = json.loads((d / "workflow.json").read_text())
+    wf = json.loads((d / "workflow.json").read_text(encoding="utf-8"))
     wf["steps"][0]["template"] = "nope"
-    (d / "workflow.json").write_text(json.dumps(wf))
+    (d / "workflow.json").write_text(json.dumps(wf), encoding="utf-8")
     assert any("template 'nope'" in e for e in workflows.check("icons")["errors"])
     wf["steps"][0]["template"] = "asset"  # falls back to the profile's own template
     wf["steps"][0]["slots"] = {"moood": "x"}
-    (d / "workflow.json").write_text(json.dumps(wf))
+    (d / "workflow.json").write_text(json.dumps(wf), encoding="utf-8")
     assert any("'slots' names moood" in e for e in workflows.check("icons")["errors"])
     wf["steps"][0].pop("template")
     wf["steps"][0].pop("slots")
-    (d / "workflow.json").write_text(json.dumps(wf))
+    (d / "workflow.json").write_text(json.dumps(wf), encoding="utf-8")
     rep = workflows.check("icons")
     assert any("no 'template'" in b for b in rep["export_blockers"])
     assert '"<prompt from WORKFLOW.md>"' in workflows.plan("icons", tmp_path / "out")["steps"][0]["command"]
     wf["steps"][2]["from"] = ["cutout"]
-    (d / "workflow.json").write_text(json.dumps(wf))
+    (d / "workflow.json").write_text(json.dumps(wf), encoding="utf-8")
     assert any("optional step 'cutout' is skipped" in w for w in workflows.check("icons")["warnings"])
 
 
@@ -297,22 +296,20 @@ def test_exported_workflow_skill_runs_its_own_plan(tmp_path):
     env = {**os.environ, "FAL_SKILLS_HOME": str(tmp_path / "empty-home")}  # only bundled profiles exist
     r = subprocess.run(
         [sys.executable, str(dest / "scripts" / "fal.py"), "workflow", "plan", "--json"],
-        capture_output=True, text=True, env=env, cwd=tmp_path,
-    )
+        capture_output=True, text=True, env=env, cwd=tmp_path, encoding="utf-8", errors="replace")
     assert r.returncode == 0, r.stderr
     plan = json.loads(r.stdout)
     assert plan["next"] == "sheet" and str(dest) in plan["steps"][2]["command"]
     assert f"{dest.resolve() / 'SKILL.md'}#sheet" in plan["steps"][0]["command"]  # templates travel in SKILL.md
     r = subprocess.run(
         [sys.executable, str(dest / "scripts" / "fal.py"), "profile", "list", "--json"],
-        capture_output=True, text=True, env=env, cwd=tmp_path,
-    )
+        capture_output=True, text=True, env=env, cwd=tmp_path, encoding="utf-8", errors="replace")
     assert {p["slug"] for p in json.loads(r.stdout)} == {"gpt-image", "remove-bg"}
 
 
 # --- split_sprites.py ------------------------------------------------------------------
 def _split(*args: str) -> tuple[int, dict]:
-    r = subprocess.run([sys.executable, str(SPLIT), *args], capture_output=True, text=True)
+    r = subprocess.run([sys.executable, str(SPLIT), *args], capture_output=True, text=True, encoding="utf-8", errors="replace")
     return r.returncode, json.loads(r.stdout)
 
 
@@ -362,8 +359,7 @@ def test_split_sprites_staggered_layout_without_clean_gaps(tmp_path):
 def _headers(env: dict) -> subprocess.CompletedProcess:
     clean = {k: v for k, v in os.environ.items() if k not in {"FAL_KEY", "FAL_KEY_ID", "FAL_KEY_SECRET", "BWS_ACCESS_TOKEN"}}
     return subprocess.run(
-        [sys.executable, str(SCRIPTS / "mcp_headers.py")], capture_output=True, text=True, env={**clean, **env}
-    )
+        [sys.executable, str(SCRIPTS / "mcp_headers.py")], capture_output=True, text=True, env={**clean, **env}, encoding="utf-8", errors="replace")
 
 
 def test_mcp_headers_helper():
@@ -378,7 +374,7 @@ def test_mcp_headers_helper():
 def test_plugin_manifest_mcp_server_uses_user_config_key():
     # fal disables OAuth dynamic client registration, and a plugin's headersHelper never sees credential env vars,
     # so the plugin's server must get its key from a sensitive userConfig option.
-    manifest = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())
+    manifest = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     server = manifest["mcpServers"]["fal-ai"]
     assert server["url"] == "https://mcp.fal.ai/mcp" and "headersHelper" not in server
     assert server["headers"]["Authorization"] == "Bearer ${user_config.fal_api_key}"
