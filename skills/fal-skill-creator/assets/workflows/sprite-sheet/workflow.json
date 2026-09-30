@@ -1,32 +1,37 @@
 {
   "format": "fal-workflow@1",
   "name": "sprite-sheet",
-  "description": "Make a set of matching assets (game items, icons, stickers, emoji, UI badges) in one consistent style: draw them all on one sheet with an image model on fal, remove the background, and split the sheet into separate transparent PNGs. Use this whenever the user wants several assets that must look alike, an icon set, a sprite sheet, or a sticker pack, even if they don't mention sheets or fal.",
-  "max_usd": 0.5,
+  "description": "Make a set of matching assets (game items, icons, stickers, emoji, UI badges) in one consistent style: draw them all on one transparent sheet with GPT Image 2.5 on fal, optionally clean the background, and split the sheet into separate transparent PNGs. Use this whenever the user wants several assets that must look alike, an icon set, a sprite sheet, or a sticker pack, even if they don't mention sheets or fal.",
   "steps": [
     {
       "id": "sheet",
       "type": "fal",
-      "profile": "nano-banana",
-      "endpoint_hint": "fal-ai/nano-banana",
-      "purpose": "Draw every asset on one sheet, in a grid with wide empty gaps, on a plain background",
-      "check": "Count the assets. None may touch each other or the edge, and there must be no text, labels or grid lines. If this fails, regenerate now: this step is cheap and the next ones are wasted on a bad sheet."
+      "profile": "gpt-image",
+      "endpoint_hint": "openai/gpt-image-2.5/sunburst/text-to-image",
+      "preset": "asset",
+      "template": "sheet",
+      "slots": {
+        "backdrop": "fully transparent, no checkerboard, no solid color"
+      },
+      "purpose": "Draw every asset on one transparent sheet, in a grid with wide empty gaps",
+      "check": "Count the assets. None may touch each other or the edge, and there must be no text, labels or grid lines. Check the background is really transparent (not a drawn checkerboard). If this fails, regenerate now: this step is cheap and everything after it builds on it."
     },
     {
       "id": "cutout",
       "type": "fal",
-      "profile": "birefnet-v2",
-      "endpoint_hint": "fal-ai/birefnet/v2",
+      "profile": "remove-bg",
+      "endpoint_hint": "fal-ai/ideogram/remove-background",
       "from": ["sheet"],
       "prompted": false,
-      "purpose": "Remove the background so every asset sits on transparency",
+      "optional": true,
+      "purpose": "Only if the sheet came back with a backdrop or a fringe: remove the background",
       "check": "Edges are clean and no part of an asset was removed (thin parts, holes, glows)."
     },
     {
       "id": "split",
       "type": "local",
-      "command": "uv run {skill}/scripts/split_sprites.py {in:cutout#image} --out {out} --pad 8",
-      "from": ["cutout"],
+      "command": "uv run {skill}/scripts/split_sprites.py {in:cutout|sheet#image} --out {out} --pad 8",
+      "from": ["cutout|sheet"],
       "purpose": "Cut the transparent sheet into one PNG per asset",
       "checkpoint": true,
       "check": "The number of files equals the number of assets asked for (add --expect N). Open two or three pieces."

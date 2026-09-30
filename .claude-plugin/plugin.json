@@ -1,7 +1,7 @@
 {
   "name": "fal",
-  "version": "1.1.1",
-  "description": "Turn any fal.ai model into a reliable generator, then combine models into workflow skills: fal MCP for discovery, schema-validated profiles, researched prompt templates, a cost guard, and chainable media pipelines.",
+  "version": "1.2.0",
+  "description": "Get the best out of fal.ai models: research each model's official guides into prompt templates and input rules, generate through them, chain outputs, and design multi-model workflows packaged as skills. Bundles the fal MCP server for model discovery.",
   "author": {
     "name": "inovue",
     "url": "https://github.com/inovue"
@@ -16,6 +16,7 @@
     "mcp",
     "media",
     "pipelines",
+    "prompt-engineering",
     "skills",
     "text-to-speech",
     "video-generation",

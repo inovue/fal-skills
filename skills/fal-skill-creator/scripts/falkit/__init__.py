@@ -5,4 +5,4 @@ dispatches into these modules. Keeping the logic here (instead of in
 per-model generated code) means one tested code path for every model.
 """
 
-__version__ = "1.1.1"
+__version__ = "1.2.0"
