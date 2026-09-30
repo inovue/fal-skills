@@ -1,0 +1,36 @@
+{
+  "format": "fal-workflow@1",
+  "name": "keyframe-to-video",
+  "description": "Turn a product, scene or ad idea into a short video with sound: design a keyframe with GPT Image 2.5 on fal, get it approved, then animate it with MiniMax H3 Max image-to-video (camera move, ambience, optional dialogue). Use this whenever the user wants a short clip, a product video, a social ad or an animated still from an idea or an image, especially when the look must be controlled before paying for video.",
+  "steps": [
+    {
+      "id": "keyframe",
+      "type": "fal",
+      "profile": "gpt-image",
+      "endpoint_hint": "openai/gpt-image-2.5/sunburst/text-to-image",
+      "preset": "hero",
+      "template": "keyframe",
+      "purpose": "The first frame of the video, at the video's aspect ratio, with room for the planned motion",
+      "check": "Subject, setting and composition match the request; there is space for the camera move; no text or watermark. The video inherits every flaw of this frame."
+    },
+    {
+      "id": "approve",
+      "type": "review",
+      "purpose": "The user approves the keyframe before any video is paid for",
+      "check": "Show the keyframe and the planned motion, camera, sound, resolution, duration and price; continue only on a yes."
+    },
+    {
+      "id": "video",
+      "type": "fal",
+      "profile": "h3-max-i2v",
+      "endpoint_hint": "minimax/h3-max/image-to-video",
+      "preset": "draft",
+      "from": [
+        "keyframe"
+      ],
+      "template": "animate",
+      "purpose": "Animate the approved keyframe (768P draft first; 1080P for delivery)",
+      "check": "Watch it: the subject stays stable, the camera does what was asked, no text or morphing, the sound fits. Read the manifest's duration and has_audio."
+    }
+  ]
+}

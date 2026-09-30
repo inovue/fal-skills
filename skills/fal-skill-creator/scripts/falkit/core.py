@@ -17,7 +17,6 @@ from .errors import (  # noqa: F401  (re-exported)
     EXIT_API,
     EXIT_AUTH,
     EXIT_ERROR,
-    EXIT_NEEDS_CONFIRMATION,
     EXIT_OK,
     EXIT_TIMEOUT,
     EXIT_USAGE,

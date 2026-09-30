@@ -6,6 +6,7 @@ roughly 200 px. When the user needs larger assets, use fewer per sheet (2×2 or 
 
 ## 1. Ask first (one message, only what's missing)
 
+- **What they're for**: game inventory, sticker pack, app icons… (goes into `{use}`).
 - **What assets**: a list ("sword, shield, potion…") or a theme and a count ("12 fantasy items").
 - **Style**: pixel art, flat vector, 3D clay, hand-drawn… and a palette, if they have one.
 - **Size needed per asset**: this decides how many fit on one sheet (above).
@@ -13,25 +14,33 @@ roughly 200 px. When the user needs larger assets, use fewer per sheet (2×2 or 
 
 ## 2. `sheet`: draw the sheet
 
-Fill this template. Keep the spacing and "no text" parts even when the user doesn't mention them; they are what
-makes the split work.
+The plan's command uses this template (`--template …#sheet`) with the profile's `asset` preset (transparent PNG).
+Fill the slots from the user's answers. The spacing and "no text" parts stay even when the user doesn't mention
+them: they are what makes the split work. The wording follows the GPT Image 2.5 guide: intended use first, then
+layout, then constraints, and an explicit transparent background with clean alpha edges.
 
-```
-A sprite sheet of {count} {style} {theme} assets arranged in a {rows} by {cols} grid: {item_list}.
-Each asset is centered in its own cell with wide empty space around it; no asset touches another or the edge.
-Plain flat {background} background, no grid lines, no text, no labels, no shadows on the background.
-Consistent style, palette and lighting across all assets, same scale, front view.
+```template sheet
+A sprite sheet for {use}: {count} {style} {theme} assets arranged in a {rows} by {cols} grid, in reading order: {item_list}.
+Each asset is centered in its own cell with wide empty space around it; no asset touches another asset or the edge of the image.
+Background: {backdrop}. No grid lines, no text, no labels, no cast shadows on the background.
+Consistent style, palette and lighting across all assets, same scale, front view. Clean alpha edges, no halo or fringing.
 ```
 
-- `{background}`: pure white by default. Use pure black for white or very light assets.
-- The profile's own `prompting.md` may add model-specific advice; follow it.
+- `{use}`: "a mobile RPG inventory screen", "a sticker pack"…
+- `{count}`, `{rows}`, `{cols}`: the number of assets and the grid you chose (leave cells empty rather than cram).
+- `{style}`: "16-bit pixel art", "flat vector", "glossy 3D"… with the palette if the user gave one. `{theme}`: "fantasy item".
+- `{item_list}`: the assets in reading order, comma-separated, in English.
+- `{backdrop}`: fixed by the workflow to a transparent background. With a model that can't make transparency, pass
+  `--slot backdrop="plain flat pure white"` (pure black for light assets) and run `cutout`.
+- Size: the profile's default is 1024×768; for 3×3 or 4×4 use `--set image_size=square_hd`, and fewer assets per
+  sheet when each asset must be large.
 - Check (see `check` in workflow.json). Regenerating this step is cheap; everything after it is not.
 
-## 3. `cutout`: remove the background
+## 3. `cutout` (optional): remove the background
 
-No prompt. The `--from label:<workflow>.sheet` in the plan wires the sheet into `image_url`. Look at the result: fine details such as
-thin swords, hair and glows are where background removal fails. If important parts are gone, try the profile's
-higher-resolution setting or skip this step and let the split key out the plain background (`--bg color`).
+Skip it when the sheet is already transparent and clean (the usual case with GPT Image 2.5 and the `asset` preset):
+go straight to `split`, which then reads the sheet. Run it when the sheet came back with a backdrop, a drawn
+checkerboard or a fringe. No prompt; the plan's `--from label:<workflow>.sheet` wires the sheet in.
 
 ## 4. `split`: cut into pieces
 
@@ -50,5 +59,5 @@ feed later steps (upscaling each piece, for example, with `--set image_url=from:
 
 ## 5. Report
 
-List the files with their sizes, the total cost (`fal runs list`), and anything that went wrong. Offer to redo single
-assets: generate just that one with the sheet profile and a matching prompt, then run `cutout` on it.
+List the files with their sizes, the runs used (`fal runs list`), and anything that went wrong. Offer to redo single
+assets: generate just that one with the profile's `asset` template, `--preset asset`.

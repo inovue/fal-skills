@@ -1,4 +1,4 @@
-"""Run a fal endpoint: build → validate → price-check → upload → submit → wait → save.
+"""Run a fal endpoint: build (template → prompt) → validate → upload → submit → wait → save.
 
 Every run lands in its own directory with the media files, the raw result and
 a `manifest.json` — the contract other runs (and other skills) consume to
@@ -12,6 +12,8 @@ import hashlib
 import json
 import mimetypes
 import re
+import shutil
+import subprocess
 import threading
 import time
 import urllib.parse
@@ -23,10 +25,9 @@ from typing import Any
 
 import httpx
 
-from . import __version__, catalog, cost, profiles, schema
+from . import __version__, pricing, profiles, schema, templates
 from .core import (
     EXIT_API,
-    EXIT_NEEDS_CONFIRMATION,
     EXIT_TIMEOUT,
     EXIT_USAGE,
     USER_AGENT,
@@ -59,6 +60,10 @@ class Target:
     @property
     def label(self) -> str:
         return self.profile["slug"] if self.profile else profiles.slugify(self.endpoint_id)
+
+    @property
+    def prompt_field(self) -> str:
+        return (self.profile or {}).get("prompt_field") or schema.prompt_field(self.input_schema) or "prompt"
 
 
 def resolve_target(profile_ref: str | None, endpoint_id: str | None) -> Target:
@@ -205,6 +210,8 @@ class Plan:
     input_sources: dict = field(default_factory=dict)  # field → local path / run ref it came from
     parents: list = field(default_factory=list)  # manifest paths this run consumed
     wiring: list = field(default_factory=list)  # human-readable autowire notes
+    prompt_template: dict | None = None  # {name, source, slots} when the prompt came from a template
+    price_estimate: dict | None = None  # from the profile's researched pricing table
 
 
 def build_arguments(
@@ -215,8 +222,12 @@ def build_arguments(
     sets: list[tuple[str, Any]] = (),
     prompt: str | None = None,
 ) -> dict:
-    """Merge order (later wins): profile defaults < preset < --input < --set < --prompt."""
+    """Merge order (later wins): profile defaults < preset < --input < --set < --prompt (into the prompt field)."""
     args: dict = json.loads(json.dumps(target.defaults))
+    if "sync_mode" in (target.input_schema.get("properties") or {}):
+        # Some endpoints default to sync_mode=true (base64 in the response, nothing in fal's history, no URL to
+        # chain from). Ask for hosted URLs unless a caller explicitly says otherwise.
+        args.setdefault("sync_mode", False)
     if preset:
         if preset not in target.presets:
             raise FalkitError(
@@ -230,7 +241,7 @@ def build_arguments(
             v = schema.coerce_cli_value(k, v, target.input_schema)
         set_path(args, k, v)
     if prompt is not None:
-        args["prompt"] = prompt
+        args[target.prompt_field] = prompt
     return args
 
 
@@ -269,47 +280,52 @@ def resolve_values(args: dict, plan: Plan, uploader: Uploader, root: Path) -> No
 
 
 def autowire(args: dict, target: Target, from_refs: list[str], plan: Plan, uploader: Uploader, root: Path) -> None:
-    """Fill empty media inputs from --from runs by matching media kind.
+    """Fill empty media inputs from --from runs: each REF fills exactly one input.
 
-    Only fills fields that are still empty, so explicit --set always wins.
-    Ambiguity (two candidate fields of the same kind) is resolved by schema
-    order and reported in plan.wiring so the agent can double-check.
+    `--from REF` takes the run's first output that fits an empty input (required inputs first, then schema order);
+    `--from REF#sel` picks outputs explicitly (an index, a kind, a field, or `*` for all of them, which only a
+    list input accepts). One REF never spills into a second input, so a two-image run can't silently become a
+    start frame *and* an end frame; give a second `--from` for that. Explicit --set values always win.
     """
     if not from_refs:
         return
-    pool: list[dict] = []
-    for ref in from_refs:
-        mpath, manifest = load_manifest(ref, root)
-        if str(mpath) not in plan.parents:
-            plan.parents.append(str(mpath))
-        for o in manifest.get("outputs") or []:
-            pool.append({**o, "_run": manifest.get("run_id")})
     required = set(target.input_schema.get("required") or [])
-    candidates = []
+    fields = []
     for name, prop in schema.ordered_properties(target.input_schema):
         kind = schema.media_kind_of_field(name, prop)
         if kind and args.get(name) in (None, "", []):
-            candidates.append((name not in required, name, prop, kind))
-    candidates.sort(key=lambda c: c[0])  # required fields first
-    used: set[int] = set()
-    for _, name, prop, kind in candidates:
-        matches = [(i, o) for i, o in enumerate(pool) if i not in used and (kind == "any" or o.get("kind") == kind)]
-        if not matches:
-            continue
-        if schema.is_list_field(prop):
-            args[name] = [_output_to_url(o, uploader) for _, o in matches]
-            used.update(i for i, _ in matches)
-            runs = sorted({o["_run"] for _, o in matches})
-            plan.wiring.append(f"{name} ← {len(matches)} {kind} output(s) from {', '.join(runs)}")
-            plan.input_sources[name] = ",".join(runs)
-        else:
-            i, o = matches[0]
-            args[name] = _output_to_url(o, uploader)
-            used.add(i)
-            plan.wiring.append(f"{name} ← {o['_run']} {o.get('field')} ({o.get('kind')})")
-            plan.input_sources[name] = f"{o['_run']}#{o.get('field')}"
-    if not plan.wiring:
-        log("warning: --from given but no empty media input matched its outputs; use --set field=from:REF")
+            fields.append((name not in required, name, prop, kind))
+    fields.sort(key=lambda c: c[0])  # required first; sort is stable, so schema order within each group
+    for ref in from_refs:
+        run_ref, _, sel = ref.partition("#")
+        mpath, manifest = load_manifest(run_ref, root)
+        if str(mpath) not in plan.parents:
+            plan.parents.append(str(mpath))
+        outs = manifest.get("outputs") or []
+        chosen = _select_output(manifest, sel) if sel else outs
+        wired = False
+        for i, (_, name, prop, kind) in enumerate(fields):
+            fits = [o for o in chosen if kind == "any" or o.get("kind") == kind]
+            if not fits:
+                continue
+            # An explicit selection goes into a list input whole; otherwise one output per REF.
+            picked = fits if schema.is_list_field(prop) and sel else fits[:1]
+            value = [_output_to_url(o, uploader) for o in picked]
+            args[name] = value if schema.is_list_field(prop) else value[0]
+            what = ", ".join(str(o.get("field")) for o in picked)
+            plan.wiring.append(f"{name} ← {manifest.get('run_id')} {what} ({picked[0].get('kind')})")
+            plan.input_sources[name] = f"{manifest.get('run_id')}#{what}"
+            unused = [o for o in fits if o not in picked]
+            if unused and not sel:
+                log(
+                    f"note: {run_ref} has {len(fits)} {kind} outputs; used the first. "
+                    f"Pick another with --from {run_ref}#<index>, or all of them with #* (list inputs only)."
+                )
+            del fields[i]
+            wired = True
+            break
+        if not wired:
+            log(f"warning: --from {ref} matched no empty media input; use --set field=from:{ref}")
 
 
 # ---------------------------------------------------------------------------
@@ -481,6 +497,8 @@ def finalize(run_dir: Path, request: dict, result: Any, root: Path, download_fil
             entry["bytes"] = download(obj["url"], dest)
             entry["local_path"] = str(dest.resolve())
             entry["sha256"] = _sha256(dest)
+            for k, v in probe_media(dest, entry["kind"]).items():
+                entry.setdefault(k, v)
         outputs.append(entry)
 
     manifest = {
@@ -495,7 +513,9 @@ def finalize(run_dir: Path, request: dict, result: Any, root: Path, download_fil
         "arguments": request["arguments"],
         "input_sources": request.get("input_sources", {}),
         "parents": request.get("parents", []),
-        "cost_estimate": request.get("cost_estimate"),
+        "prompt_template": request.get("prompt_template"),
+        "pricing": request.get("pricing"),
+        "price_estimate": request.get("price_estimate"),
         "seed": result.get("seed") if isinstance(result, dict) else None,
         "outputs": outputs,
         "text": {k: v for k, v in result.items() if isinstance(v, str) and k not in {"prompt"} and len(v) < 20000}
@@ -533,6 +553,42 @@ def _image_size(path: Path) -> tuple[int, int] | None:
                 f.seek(size - 2, 1)
     except OSError:
         return None
+
+
+def probe_media(path: Path, kind: str) -> dict:
+    """Measure what fal often doesn't report: image size; video/audio duration, size, fps and whether there's sound.
+
+    Uses ffprobe when it's installed; without it, images still get their size from the file header.
+    """
+    out: dict[str, Any] = {}
+    if kind == "image":
+        size = _image_size(path)
+        if size:
+            out["width"], out["height"] = size
+        return out
+    if kind not in ("video", "audio") or not shutil.which("ffprobe"):
+        return out
+    try:
+        proc = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,width,height,r_frame_rate:format=duration",
+             "-of", "json", str(path)],
+            capture_output=True, text=True, timeout=30, encoding="utf-8", errors="replace",
+        )
+        info = json.loads(proc.stdout or "{}")
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return out
+    streams = info.get("streams") or []
+    dur = (info.get("format") or {}).get("duration")
+    if dur:
+        out["duration"] = round(float(dur), 3)
+    video = next((st for st in streams if st.get("codec_type") == "video"), None)
+    if video:
+        out["width"], out["height"] = video.get("width"), video.get("height")
+        num, _, den = str(video.get("r_frame_rate") or "").partition("/")
+        if num.isdigit() and den.isdigit() and int(den):
+            out["fps"] = round(int(num) / int(den), 3)
+        out["has_audio"] = any(st.get("codec_type") == "audio" for st in streams)
+    return out
 
 
 def ingest(
@@ -578,9 +634,7 @@ def ingest(
             "bytes": dest.stat().st_size,
             "sha256": _sha256(dest),
         }
-        size = _image_size(dest) if entry["kind"] == "image" else None
-        if size:
-            entry["width"], entry["height"] = size
+        entry.update(probe_media(dest, entry["kind"]))
         outputs.append(entry)
     stamp = now_iso()
     arguments = {"note": note, "sources": [str(f.resolve()) for f in files]}
@@ -596,7 +650,9 @@ def ingest(
         "arguments": arguments,
         "input_sources": {},
         "parents": parents,
-        "cost_estimate": {"usd": 0.0, "confidence": "high"},
+        "prompt_template": None,
+        "pricing": None,
+        "price_estimate": None,
         "seed": None,
         "outputs": outputs,
         "text": {},
@@ -620,6 +676,15 @@ def ingest(
     return manifest
 
 
+def _prompt_text(manifest: dict) -> str | None:
+    args = manifest.get("arguments") or {}
+    field_name = (manifest.get("prompt_template") or {}).get("field")
+    for k in (field_name, "prompt", "text", "note"):
+        if k and isinstance(args.get(k), str):
+            return args[k]
+    return None
+
+
 def _append_index(root: Path, manifest: dict, run_dir: Path) -> None:
     line = {
         "run_id": manifest["run_id"],
@@ -628,8 +693,9 @@ def _append_index(root: Path, manifest: dict, run_dir: Path) -> None:
         "profile": manifest.get("profile"),
         "label": manifest.get("label"),
         "kinds": sorted({o["kind"] for o in manifest["outputs"]}),
-        "prompt": truncate(manifest["arguments"].get("prompt") or manifest["arguments"].get("note"), 120),
-        "cost_usd": (manifest.get("cost_estimate") or {}).get("usd"),
+        "prompt": truncate(_prompt_text(manifest), 120),
+        "template": (manifest.get("prompt_template") or {}).get("name"),
+        "price_usd": (manifest.get("price_estimate") or {}).get("usd"),
         "manifest": str((run_dir / "manifest.json").resolve().relative_to(root.resolve())),
     }
     with _print_lock:
@@ -706,7 +772,23 @@ class RunOptions:
     mock_result: Any = None
 
 
-def execute(target: Target, plan: Plan, estimate: dict, opts: RunOptions, prefix: str = "") -> dict:
+def _pricing_table(target: Target) -> dict | None:
+    if not target.profile:
+        return None
+    try:
+        return pricing.load(Path(target.profile["path"]))
+    except FalkitError as e:
+        log(f"warning: {e}")
+        return None
+
+
+def pricing_snapshot(target: Target) -> dict | None:
+    """The profile's unit price (as of its last refresh), recorded for reference. Never used to block a run."""
+    p = (target.profile or {}).get("pricing")
+    return {k: p.get(k) for k in ("unit_price", "unit", "currency", "fetched_at") if k in p} if p else None
+
+
+def execute(target: Target, plan: Plan, opts: RunOptions, prefix: str = "") -> dict:
     run_id, run_dir = new_run_dir(opts.root, target.label, opts.label)
     request = {
         "run_id": run_id,
@@ -717,7 +799,9 @@ def execute(target: Target, plan: Plan, estimate: dict, opts: RunOptions, prefix
         "arguments": plan.arguments,
         "input_sources": plan.input_sources,
         "parents": plan.parents,
-        "cost_estimate": estimate,
+        "prompt_template": plan.prompt_template,
+        "pricing": pricing_snapshot(target),
+        "price_estimate": plan.price_estimate,
         "submitted_at": now_iso(),
     }
     if opts.mock_result is not None:
@@ -754,10 +838,22 @@ def execute(target: Target, plan: Plan, estimate: dict, opts: RunOptions, prefix
     return finalize(run_dir, request, result, opts.root, opts.download)
 
 
+def _submitted(run_dir: Path) -> dict:
+    request = read_json(run_dir / "request.json")
+    if not request.get("request_id"):
+        raise FalkitError(
+            f"Run {request.get('run_id')} was never accepted by fal (status: {request.get('status')})",
+            EXIT_USAGE,
+            hint=request.get("error") or "Nothing is running for it; fix the arguments and run again.",
+        )
+    return request
+
+
 def fetch(run_dir: Path, root: Path, timeout_s: float, download_files: bool = True) -> dict:
     request = read_json(run_dir / "request.json")
     if request.get("status") == "completed":
         return read_json(run_dir / "manifest.json")
+    request = _submitted(run_dir)
     handle = _client().get_handle(request["endpoint_id"], request["request_id"])
     try:
         result = wait_for(handle, timeout_s)
@@ -772,6 +868,7 @@ def status(run_dir: Path) -> dict:
     request = read_json(run_dir / "request.json")
     if request.get("status") in {"completed", "mock"}:
         return {"status": "completed", "run_dir": str(run_dir)}
+    request = _submitted(run_dir)
     handle = _client().get_handle(request["endpoint_id"], request["request_id"])
     st = handle.status(with_logs=False)
     name = {fal_client.Queued: "queued", fal_client.InProgress: "running", fal_client.Completed: "completed"}.get(
@@ -784,7 +881,7 @@ def status(run_dir: Path) -> dict:
 
 
 def cancel(run_dir: Path) -> None:
-    request = read_json(run_dir / "request.json")
+    request = _submitted(run_dir)
     _client().get_handle(request["endpoint_id"], request["request_id"]).cancel()
     request["status"] = "cancelled"
     write_json(run_dir / "request.json", request)
@@ -793,6 +890,51 @@ def cancel(run_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 # Orchestration used by the CLI
 # ---------------------------------------------------------------------------
+SLOTS_KEY = "$slots"  # in a --batch line: per-request template slot values, merged over --slot
+
+
+def render_prompt(
+    target: Target, template: dict | None, slot_values: dict, overlay: dict, args: dict | None = None
+) -> tuple[str | None, dict | None]:
+    """Render the template for one request. Returns (prompt, provenance for the manifest).
+
+    `{=param}` placeholders take the request's own parameter values (after defaults, presets and --set), so the
+    prompt and the parameters can't disagree.
+    """
+    if not template:
+        return None, None
+    values = {**slot_values, **(overlay.get(SLOTS_KEY) or {})}
+    props = target.input_schema.get("properties") or {}
+    as_slot = sorted(k for k in values if k in props)
+    if as_slot:
+        raise FalkitError(
+            f"{', '.join(as_slot)} {'is a model parameter' if len(as_slot) == 1 else 'are model parameters'}, "
+            "not template slots",
+            EXIT_USAGE,
+            hint=" ".join(f"Use --set {k}=… instead of --slot." for k in as_slot),
+        )
+    clash = [x for x in template["slots"] if x in props]
+    if clash:
+        raise FalkitError(
+            f"Template {template['name']!r} uses parameter name(s) {', '.join(clash)} as slots",
+            EXIT_USAGE,
+            hint=f"Fix the template: write {', '.join('{=' + x + '}' for x in clash)} for the request's value, "
+            "or rename the slot. `fal.py profile check` lists every problem.",
+        )
+    params = {p: (args or {}).get(p, (props.get(p) or {}).get("default")) for p in template.get("params") or []}
+    prompt, unused, warnings = templates.render(template["body"], values, params)
+    if unused:
+        raise FalkitError(
+            f"Template {template['name']!r} has no slot(s) {', '.join(unused)}",
+            EXIT_USAGE,
+            hint=f"Its slots: {', '.join(template['slots'])}. A misspelled slot would silently drop what you meant.",
+        )
+    for w in warnings:
+        log(f"warning: {w}")
+    used = {k: v for k, v in values.items() if k in template["slots"]}
+    return prompt, {"name": template["name"], "source": template["source"], "slots": used, "field": target.prompt_field}
+
+
 def prepare(
     target: Target,
     overlay: dict,
@@ -803,11 +945,18 @@ def prepare(
     from_refs: list[str],
     uploader: Uploader,
     root: Path,
+    template: dict | None = None,
+    slot_values: dict | None = None,
     strict: bool = True,
     quiet: bool = False,
 ) -> Plan:
+    overlay = dict(overlay)
+    slots_overlay = {SLOTS_KEY: overlay.pop(SLOTS_KEY)} if SLOTS_KEY in overlay else {}
     args = build_arguments(target, preset=preset, input_obj=overlay, sets=sets, prompt=prompt)
-    plan = Plan(arguments=args)
+    rendered, provenance = render_prompt(target, template, slot_values or {}, slots_overlay, args)
+    if rendered is not None:
+        args[target.prompt_field] = rendered
+    plan = Plan(arguments=args, prompt_template=provenance)
     resolve_values(args, plan, uploader, root)
     autowire(args, target, from_refs, plan, uploader, root)
     errors, warnings = schema.validate(args, target.input_schema)
@@ -820,7 +969,7 @@ def prepare(
         raise FalkitError(
             "Arguments do not match the model schema:\n  " + "\n  ".join(errors),
             EXIT_USAGE,
-            hint="Inspect parameters with `fal.py schema <endpoint> --summary` or the profile's schema.json.",
+            hint="Inspect parameters with `fal.py schema <endpoint>` or the profile's schema.json.",
         )
     if errors and not quiet:
         # --dry-run reports schema problems without stopping, so the whole plan is visible at once.
@@ -829,11 +978,19 @@ def prepare(
     return plan
 
 
-def price_for(target: Target) -> dict | None:
-    live = catalog.get_prices([target.endpoint_id]).get(target.endpoint_id)
-    if live:
-        return live
-    return (target.profile or {}).get("pricing")
+def research_note(target: Target, prompted: bool) -> str | None:
+    """Why this prompt may not be the model's best input, or None when it's backed by research."""
+    if not prompted:
+        return None
+    if not target.profile:
+        return (
+            "no profile: this prompt isn't backed by research on the model. "
+            "Create one (`profile init`, then research prompting.md) before relying on the result."
+        )
+    status = target.profile.get("prompting_status")
+    if status != "researched":
+        return f"profile {target.profile['slug']!r} prompting is {status}; research prompting.md (SKILL.md A4) first."
+    return None
 
 
 def run_many(
@@ -845,67 +1002,67 @@ def run_many(
     prompt: str | None,
     from_refs: list[str],
     opts: RunOptions,
-    max_cost: float | None,
-    assume_yes: bool,
     dry_run: bool,
     concurrency: int,
+    template: dict | None = None,
+    slot_values: dict | None = None,
 ) -> dict:
-    # Pass 1 resolves @files as placeholders, so nothing leaves the machine before the cost guard says yes.
+    kw = dict(preset=preset, sets=sets, prompt=prompt, from_refs=from_refs, root=opts.root, template=template,
+              slot_values=slot_values)
+    # Pass 1 builds and validates every request with @files as placeholders, so nothing is uploaded
+    # until all of them are known to be valid.
     dry = Uploader(dry_run=True)
-    plans = [
-        prepare(
-            target, ov, preset=preset, sets=sets, prompt=prompt, from_refs=from_refs, uploader=dry, root=opts.root,
-            strict=not dry_run,
-        )
-        for ov in overlays
-    ]
-    price = price_for(target)
-    estimates = [cost.estimate(price, p.arguments, target.input_schema) for p in plans]
-    total = cost.combine(estimates)
-    limit = cost.max_usd(max_cost, target.profile)
-    ok, reason = cost.guard(total, limit)
+    plans = [prepare(target, ov, uploader=dry, strict=not dry_run, **kw) for ov in overlays]
+    prompted = any(target.prompt_field in p.arguments for p in plans)
+    note = research_note(target, prompted)
+    if note:
+        log(f"note: {note}")
+    table = _pricing_table(target)
+    for p in plans:
+        p.price_estimate = pricing.estimate(table, p.arguments, target.input_schema)
+    price_total = pricing.total([p.price_estimate for p in plans])
+    log(f"price: {pricing.describe(price_total if len(plans) > 1 else plans[0].price_estimate)}")
 
     if dry_run:
         return {
             "dry_run": True,
             "endpoint_id": target.endpoint_id,
             "profile": target.profile["slug"] if target.profile else None,
+            "prompt_field": target.prompt_field,
             "requests": [
-                {"arguments": p.arguments, "input_sources": p.input_sources, "wiring": p.wiring} for p in plans
+                {
+                    "arguments": p.arguments,
+                    "prompt_template": p.prompt_template,
+                    "price_estimate": p.price_estimate,
+                    "input_sources": p.input_sources,
+                    "wiring": p.wiring,
+                }
+                for p in plans
             ],
-            "cost_estimate": total,
-            "cost_guard": {"ok": ok, "limit_usd": limit, "reason": reason},
+            "price_total": price_total,
+            "pricing": pricing_snapshot(target),
+            "research": note or "ok",
         }
-    if not ok and not assume_yes and opts.mock_result is None:
-        raise FalkitError(
-            f"Cost guard: {reason}",
-            EXIT_NEEDS_CONFIRMATION,
-            hint="Ask the user to approve, then rerun with --yes (or raise --max-cost).",
-        )
-    log(f"cost: {reason}")
     # Pass 2: real uploads / URL liveness checks. --mock never touches the network, so it keeps pass 1's placeholders.
     if opts.mock_result is None and any(p.input_sources for p in plans):
         real = Uploader(dry_run=False)
-        plans = [
-            prepare(
-                target, ov, preset=preset, sets=sets, prompt=prompt, from_refs=from_refs, uploader=real,
-                root=opts.root, strict=True, quiet=True,
-            )
-            for ov in overlays
-        ]
+        estimates = [p.price_estimate for p in plans]
+        plans = [prepare(target, ov, uploader=real, strict=True, quiet=True, **kw) for ov in overlays]
+        for p, est in zip(plans, estimates, strict=True):
+            p.price_estimate = est
 
     if len(plans) == 1:
-        return execute(target, plans[0], estimates[0], opts)
+        return execute(target, plans[0], opts)
 
     results: list[Any] = [None] * len(plans)
 
     def work(i: int) -> None:
         try:
-            results[i] = execute(target, plans[i], estimates[i], opts, prefix=f"[{i + 1}/{len(plans)}] ")
+            results[i] = execute(target, plans[i], opts, prefix=f"[{i + 1}/{len(plans)}] ")
         except FalkitError as e:
             results[i] = {"error": str(e), "code": e.code}
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
         list(pool.map(work, range(len(plans))))
     failed = [r for r in results if isinstance(r, dict) and "error" in r]
-    return {"batch": True, "total": len(plans), "failed": len(failed), "cost_estimate": total, "runs": results}
+    return {"batch": True, "total": len(plans), "failed": len(failed), "price_total": price_total, "runs": results}

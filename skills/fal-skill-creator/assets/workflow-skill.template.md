@@ -17,22 +17,23 @@ metadata:
 Steps:
 {{steps}}
 
-A full run costs {{cost}} at the bundled profiles' defaults. The bundled profiles ({{profiles}}) live in
-`profiles/`, and the steps' scripts are in `scripts/`.
+The bundled profiles ({{profiles}}) live in `profiles/`, each with a researched `prompting.md`; the steps' scripts
+are in `scripts/`. Prices at export time, at each step's settings: {{pricing}}.
 
 `fal` below is short for `uv run <this-skill-dir>/scripts/fal.py`. Without uv, run
 `pip install "fal-client>=1.0,<2" httpx jsonschema` and use `python3 <this-skill-dir>/scripts/fal.py`.
 
 1. Run `fal workflow plan`. It prints each step's command, fills in files from steps that have already run, and
    names the next step. Run it again after every step.
-2. Run **one step at a time**. After each step with a `check`, look at the output yourself (open images; read the
+2. For `fal` steps, the command already names the step's template (`--template …`). Replace each `<slot>`
+   placeholder with a value from the user's request, following the step's section above and the profile's
+   `profiles/<slug>/prompting.md` (key rules, inputs, limitations). Add `--dry-run` once to see the rendered prompt.
+3. Run **one step at a time**. After each step with a `check`, look at the output yourself (open images; read the
    manifest for video and audio) and fix problems before paying for the next step. Show the user the result of
-   the first expensive step before continuing.
-3. For `fal` steps, write the prompt from the template in the matching section above, then run the command. For
-   `local` steps, run the command, then its `then` line (`fal ingest …`), which records the files so later steps
+   the first expensive step (video, 3D, batches) before continuing.
+4. For `local` steps, run the command, then its `then` line (`fal ingest …`), which records the files so later steps
    can use them.
 
-Exit codes: 2 means fix the arguments. 3 means the cost needs approval: show the user the estimate, and rerun with
-`--yes` only after they agree. 4 means a key problem (`references/auth.md`). 5 means fal returned an error.
-6 means the job is still running: `fal fetch <run_dir>`, and don't resubmit. Outputs are saved in `./fal-outputs/`
-with a `manifest.json` per run (`references/pipelines.md`).
+Exit codes: 2 means fix the arguments or a missing `--slot`. 4 means a key problem (`references/auth.md`). 5 means fal
+returned an error. 6 means the job is still running: `fal fetch <run_dir>`, and don't resubmit. Outputs are saved in
+`./fal-outputs/` with a `manifest.json` per run (`references/pipelines.md`).

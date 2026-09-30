@@ -12,7 +12,7 @@ import re
 import shutil
 from pathlib import Path
 
-from . import __version__, profiles
+from . import __version__, profiles, templates
 from .core import EXIT_USAGE, SKILL_DIR, FalkitError, log, read_json
 
 _CATEGORY_VERBS = {
@@ -35,10 +35,10 @@ def _description(prof: dict) -> str:
     verb = _CATEGORY_VERBS.get(prof.get("category") or "", f"run {prof.get('category') or 'generation'} tasks")
     name = prof.get("display_name") or prof["endpoint_id"]
     return (
-        f"{verb[0].upper() + verb[1:]} with {name} ({prof['endpoint_id']}) on fal.ai, using researched prompt "
-        f"templates, pinned defaults, a cost guard and pipeline-ready manifests. Use this whenever the user asks "
-        f"for {name} or wants to {verb} and this model fits, including as a step chained after or before other "
-        f"fal-* generation skills."
+        f"{verb[0].upper() + verb[1:]} with {name} ({prof['endpoint_id']}) on fal.ai, using prompt templates and "
+        f"input rules researched from the model's official guides, pinned defaults, and pipeline-ready manifests. "
+        f"Use this whenever the user asks for {name} or wants to {verb} and this model fits, including as a step "
+        f"chained after or before other fal-* generation skills."
     )
 
 
@@ -75,13 +75,22 @@ def render(template: str, values: dict[str, str]) -> str:
     return template
 
 
-def export(ref: str, dest_root: Path, name: str | None, force: bool) -> Path:
+def export(ref: str, dest_root: Path, name: str | None, force: bool, description: str | None = None) -> Path:
     src = profiles.find(ref)
     prof = read_json(src / "profile.json")
+    report = profiles.check(str(src))
+    if prof.get("prompting_status") != "researched" or report["errors"]:
+        raise FalkitError(
+            f"Profile {prof['slug']!r} isn't researched, so the exported skill would prompt the model blind",
+            EXIT_USAGE,
+            hint="Research prompting.md (SKILL.md A4), pass `fal.py profile check`, and mark it researched first.",
+        )
+    if description is not None and not 0 < len(description) <= 1024:
+        raise FalkitError("--description must be 1-1024 characters", EXIT_USAGE)
     dest = prepare_dest(dest_root, name or f"fal-{prof['slug']}", force)
     skill_name = dest.name
-    if prof.get("prompting_status") != "researched":
-        log("warning: this profile's prompting.md has not been researched yet — the exported skill will be weaker.")
+    for w in report["warnings"]:
+        log(f"warning: prompting.md: {w}")
 
     vendor_runtime(dest)
     shutil.copytree(src, dest / "profile", ignore=shutil.ignore_patterns("openapi.json"))
@@ -92,12 +101,13 @@ def export(ref: str, dest_root: Path, name: str | None, force: bool) -> Path:
     tpl = (SKILL_DIR / "assets" / "exported-skill.template.md").read_text(encoding="utf-8")
     values = {
         "skill_name": skill_name,
-        "description": _description(prof).replace('"', "'"),
+        "description": " ".join((description or _description(prof)).split()).replace('"', "'"),
         "display_name": prof.get("display_name") or prof["endpoint_id"],
         "endpoint_id": prof["endpoint_id"],
         "category": prof.get("category") or "unknown",
         "runtime_version": __version__,
         "presets": ", ".join(f"`{p}`" for p in presets) or "none yet",
+        "templates": _templates_block(src / "prompting.md"),
         "defaults": _defaults_line(read_json(src / "defaults.json") if (src / "defaults.json").exists() else {}),
         "pricing": _pricing_line(prof.get("pricing")),
     }
@@ -108,6 +118,13 @@ def export(ref: str, dest_root: Path, name: str | None, force: bool) -> Path:
     return dest
 
 
+def _templates_block(path: Path) -> str:
+    found = templates.parse(path.read_text(encoding="utf-8")) if path.exists() else {}
+    if not found:
+        return "- (none: write the prompt by hand following `profile/prompting.md`)"
+    return "\n".join(f"- `{n}`: {templates.describe(b)}" for n, b in found.items())
+
+
 def _defaults_line(defaults: dict) -> str:
     if not defaults:
         return "the model's own defaults"
@@ -116,5 +133,5 @@ def _defaults_line(defaults: dict) -> str:
 
 def _pricing_line(p: dict | None) -> str:
     if not p:
-        return "unknown (the cost guard will ask before expensive runs)"
+        return "unknown (check https://fal.ai/pricing before expensive runs)"
     return f"${p.get('unit_price')} per {p.get('unit')} (as of {str(p.get('fetched_at', ''))[:10]})"

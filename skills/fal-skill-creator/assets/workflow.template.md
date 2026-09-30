@@ -2,7 +2,9 @@
 
 <!--
 This file becomes the body of the exported skill. Write it for an agent that has never seen this workflow.
-Keep model-specific prompting advice in each profile's prompting.md; keep here only what this workflow adds.
+Put each prompted step's template here as a ```template <name> block and name it in the step's "template"
+field in workflow.json. Write it with the step's profile's prompting.md open: follow its key rules and prompt
+structure, and keep only what this workflow adds (layout, consistency constraints, what the next step needs).
 See references/workflows.md in fal-skill-creator for the format and the design rules.
 -->
 
@@ -14,11 +16,13 @@ One or two sentences: what the user gets, and why these steps in this order.
 
 ## 2. `<step-id>`: <what this step does>
 
-Prompt template (for fal steps that take a prompt), with `{slots}`:
+Template (the profile's key rules applied: …):
 
+```template <step-id>
+…{slot}…
 ```
-…
-```
+
+- `{slot}`: what goes here, and a default when the user doesn't say.
 
 Check before continuing: … (what a bad result looks like, and what to do about it)
 
@@ -26,4 +30,4 @@ Check before continuing: … (what a bad result looks like, and what to do about
 
 ## Report
 
-What to hand back: files, sizes, the total cost (`fal runs list`), and anything that went wrong.
+What to hand back: files, sizes, the runs used (`fal runs list`), and anything that went wrong.

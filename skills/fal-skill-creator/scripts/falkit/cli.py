@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from . import __version__, catalog, cost, profiles, runner, schema, workflows
+from . import __version__, catalog, profiles, runner, schema, templates, workflows
 from .core import (
     EXIT_OK,
     EXIT_USAGE,
@@ -114,6 +114,9 @@ def cmd_profile_init(a: argparse.Namespace) -> Any:
             "defaults": prof["defaults"],
             "parameters": summary,
             "pricing": prof.get("pricing"),
+            "prompting_status": prof.get("prompting_status"),
+            "guide_source": prof.get("guide_source"),
+            "recommended_defaults": prof.get("recommended_defaults"),
         }
     print(f"Created profile {prof['slug']!r} at {d}")
     p = prof.get("pricing")
@@ -121,7 +124,18 @@ def cmd_profile_init(a: argparse.Namespace) -> Any:
     print("pinned defaults: " + json.dumps(prof["defaults"], ensure_ascii=False))
     print("\nparameters:")
     print(schema.format_summary(summary))
-    print("\nnext: review defaults with the user, then research prompting (prompting.md).")
+    print(f"prompt field: {prof.get('prompt_field') or 'none (this model takes no text prompt)'}")
+    if prof.get("guide_source"):
+        print(f"input guide: seeded from the bundled research ({prof['guide_source']}), status {prof['prompting_status']}")
+        rec = prof.get("recommended_defaults") or {}
+        if rec:
+            print("applied the guide's recommended defaults (confirm with the user; change with `profile set`): "
+                  + " ".join(f"{k}={json.dumps(v)}" for k, v in rec.items()))
+        if prof.get("validated_with"):
+            print(f"validated: {prof['validated_with']}")
+        if prof.get("presets"):
+            print("presets: " + ", ".join(prof["presets"]))
+    print("\nnext: confirm defaults with the user, then research prompting.md (SKILL.md A4).")
     return None
 
 
@@ -171,13 +185,67 @@ def cmd_profile_preset(a: argparse.Namespace) -> Any:
 def cmd_profile_meta(a: argparse.Namespace) -> Any:
     fields: dict[str, Any] = {}
     if a.max_usd is not None:
-        fields["max_usd"] = None if a.max_usd < 0 else a.max_usd
+        log("note: --max-usd is ignored; the cost guard was removed in 1.2")
+    if a.validated_with:
+        prof = profiles.load(a.profile)
+        _, m = runner.load_manifest(a.validated_with, output_root(a.out))
+        needs_template = bool(prof.get("prompt_field"))
+        if m.get("profile") != prof["slug"] or not m.get("outputs") or (needs_template and not m.get("prompt_template")):
+            raise FalkitError(
+                f"Run {m.get('run_id')} can't validate {prof['slug']!r}: it has to be a completed run of this "
+                "profile" + (" made with --template" if needs_template else ""),
+                EXIT_USAGE,
+            )
+        fields["validated_with"] = m["run_id"]
+    if a.prompt_field:
+        fields["prompt_field"] = a.prompt_field
     if a.prompting_status:
         fields["prompting_status"] = a.prompting_status
     if a.notes is not None:
         fields["notes"] = a.notes
     prof = profiles.set_meta(a.profile, **fields)
     return prof if a.json else print(json.dumps(prof, ensure_ascii=False, indent=2))
+
+
+def cmd_profile_check(a: argparse.Namespace) -> Any:
+    res = profiles.check(a.profile, online=not a.offline)
+    if a.json:
+        emit_json(res)
+    else:
+        verdict = "ok" if not res["errors"] else "not ready"
+        print(f"{res['profile']}: prompting.md {verdict} (status: {res['status']})")
+        for e in res["errors"]:
+            print(f"  ✗ {e}")
+        for w in res["warnings"]:
+            print(f"  ! {w}")
+        for name, slots in res["templates"].items():
+            print(f"  template {name}: {', '.join(slots) or '(no slots)'}")
+    if res["errors"]:
+        raise SystemExit(EXIT_USAGE)
+    return None
+
+
+def cmd_profile_templates(a: argparse.Namespace) -> Any:
+    prof = profiles.load(a.profile)
+    found = templates.parse((Path(prof["path"]) / "prompting.md").read_text(encoding="utf-8"))
+    rows = {
+        name: {
+            "slots": templates.required_slots(body),
+            "optional": templates.optional_slots(body),
+            "from_request": templates.param_slots(body),
+            "body": body,
+        }
+        for name, body in found.items()
+    }
+    if a.json:
+        return rows
+    if not rows and not prof.get("prompt_field"):
+        print("This model takes no text prompt; its guide covers inputs and parameters only.")
+    elif not rows:
+        print("No templates yet. Add ```template <name> blocks to prompting.md (references/prompt-research.md).")
+    for name, r in rows.items():
+        print(f"## {name}  {templates.describe(r['body']).replace('`', '')}\n{r['body']}\n")
+    return None
 
 
 def cmd_profile_refresh(a: argparse.Namespace) -> Any:
@@ -226,6 +294,14 @@ def _load_overlays(a: argparse.Namespace) -> list[dict]:
 
 def cmd_run(a: argparse.Namespace) -> Any:
     target = runner.resolve_target(a.profile, a.endpoint)
+    if a.max_cost is not None or a.yes:
+        log("note: --yes and --max-cost are ignored; the cost guard was removed in 1.2")
+    if a.template and a.prompt is not None:
+        raise FalkitError("Pass either --template or --prompt, not both", EXIT_USAGE)
+    if a.slot and not a.template:
+        raise FalkitError("--slot needs --template", EXIT_USAGE)
+    template = templates.load(a.template, target.profile) if a.template else None
+    slot_values = dict(parse_assignment(x) for x in a.slot or [])
     mock = read_json(Path(a.mock)) if a.mock else None
     opts = runner.RunOptions(
         root=output_root(a.out),
@@ -244,10 +320,10 @@ def cmd_run(a: argparse.Namespace) -> Any:
         prompt=a.prompt,
         from_refs=a.from_ or [],
         opts=opts,
-        max_cost=a.max_cost,
-        assume_yes=a.yes,
         dry_run=a.dry_run,
         concurrency=a.concurrency,
+        template=template,
+        slot_values=slot_values,
     )
     if a.json:
         return res
@@ -321,8 +397,8 @@ def cmd_runs_list(a: argparse.Namespace) -> Any:
     if not entries:
         print(f"No runs recorded in {root}")
     for e in reversed(entries):
-        cost_s = f"${e['cost_usd']}" if e.get("cost_usd") is not None else ""
-        print(f"{e['run_id']:<60} {','.join(e.get('kinds') or []):<12} {cost_s:<8} {e.get('prompt') or ''}")
+        tpl = f"[{e['template']}]" if e.get("template") else ""
+        print(f"{e['run_id']:<60} {','.join(e.get('kinds') or []):<12} {tpl:<14} {e.get('prompt') or ''}")
     return None
 
 
@@ -390,11 +466,8 @@ def cmd_workflow_check(a: argparse.Namespace) -> Any:
             print(f"  ✗ {e}")
         for w in res["warnings"]:
             print(f"  ! {w}")
-        c = res["cost_per_run"]
-        extra = f" + unknown ({', '.join(c['unknown_steps'])})" if c["unknown_steps"] else ""
-        print(f"  cost per run: ${c['known_usd']:.4f}{extra}")
-        for sid, est in c["steps"].items():
-            print(f"    {sid}: " + (f"${est['usd']:.4f}" if est.get("usd") is not None else est.get("reason", "unknown")))
+        for sid, p in res["pricing"].items():
+            print(f"  price {sid}: {p['text'] if p else 'unknown'}")
     if not res["ok"]:
         raise SystemExit(EXIT_USAGE)
     return None
@@ -404,14 +477,22 @@ def cmd_workflow_plan(a: argparse.Namespace) -> Any:
     res = workflows.plan(a.workflow, output_root(a.out))
     if a.json:
         return res
-    print(f"{res['name']} — next step: {res['next'] or res['note']}")
+    nxt = res["next"] or res["note"]
+    if res.get("skip_to"):
+        nxt += f" (optional; or skip it and run {res['skip_to']})"
+    print(f"{res['name']} — next step: {nxt}")
     for i, r in enumerate(res["steps"], 1):
-        state = f"done {r['done']['run_id']}" if r["done"] else "pending"
-        print(f"\n{i}. {r['id']} [{r['type']}] {state}")
+        state = f"done {r['done']['run_id']}" if r["done"] else ("skipped" if r.get("skipped") else "pending")
+        opt = ", optional" if r.get("optional") else ""
+        print(f"\n{i}. {r['id']} [{r['type']}{opt}] {state}")
         if r.get("purpose"):
             print(f"   purpose: {r['purpose']}")
         if r.get("command"):
             print(f"   $ {r['command']}")
+        if r.get("fill"):
+            print(f"   fill from the request: {', '.join(r['fill'])} (see the step's section in WORKFLOW.md)")
+        if r.get("optional_slots"):
+            print(f"   optional slots (add --slot name=value when the request has them): {', '.join(r['optional_slots'])}")
         if r.get("then"):
             print(f"   $ {r['then']}")
         if r.get("blocked_by"):
@@ -442,7 +523,7 @@ def cmd_workflow_path(a: argparse.Namespace) -> Any:
 def cmd_export(a: argparse.Namespace) -> Any:
     from . import export
 
-    dest = export.export(a.profile, Path(a.dest).expanduser(), a.name, a.force)
+    dest = export.export(a.profile, Path(a.dest).expanduser(), a.name, a.force, a.description)
     if a.json:
         return {"path": str(dest)}
     print(f"Exported standalone skill to {dest}")
@@ -488,7 +569,6 @@ def cmd_doctor(a: argparse.Namespace) -> Any:
     checks.append(("workflows", True, " → ".join(str(d) for d in workflows.search_dirs())))
     root = output_root(a.out)
     checks.append(("output dir", os.access(root if root.exists() else Path("."), os.W_OK), str(root.resolve())))
-    checks.append(("max cost", True, f"${cost.max_usd(None, None):.2f} per run (FAL_MAX_COST)"))
     if a.json:
         return {"version": __version__, "checks": [{"name": n, "ok": ok, "detail": d} for n, ok, d in checks]}
     print(f"fal-skill-creator runtime {__version__}")
@@ -505,7 +585,9 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--json", action="store_true", help="machine-readable output on stdout")
     common.add_argument("--out", help="output root for runs (default: $FAL_OUTPUT_DIR or ./fal-outputs)")
 
-    p = argparse.ArgumentParser(prog="fal.py", description="fal.ai model discovery, profiles and generation runs.")
+    p = argparse.ArgumentParser(
+        prog="fal.py", description="fal.ai: researched model profiles, templated generation, pipelines and workflows."
+    )
     p.add_argument("--version", action="version", version=__version__)
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -561,12 +643,25 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("assignments", nargs="*")
     s.add_argument("--delete", action="store_true")
     s.set_defaults(fn=cmd_profile_preset)
-    s = pp.add_parser("meta", parents=[common], help="set cost guard / research status / notes")
+    s = pp.add_parser("meta", parents=[common], help="research status, validation run, prompt field, notes")
     s.add_argument("profile")
-    s.add_argument("--max-usd", type=float, help="per-run cost limit for this profile (negative clears)")
-    s.add_argument("--prompting-status", choices=["unresearched", "researched", "stale"])
+    s.add_argument(
+        "--prompting-status",
+        choices=["unresearched", "researched", "stale"],
+        help="'researched' is refused until `profile check` passes",
+    )
+    s.add_argument("--validated-with", metavar="RUN_ID", help="the run that confirmed the templates work")
+    s.add_argument("--prompt-field", help="the input field --prompt/--template fill (auto-detected)")
     s.add_argument("--notes")
+    s.add_argument("--max-usd", type=float, help=argparse.SUPPRESS)  # retired in 1.2; accepted and ignored
     s.set_defaults(fn=cmd_profile_meta)
+    s = pp.add_parser("check", parents=[common], help="check prompting.md against the research standard")
+    s.add_argument("profile")
+    s.add_argument("--offline", action="store_true", help="skip fetching the cited source URLs")
+    s.set_defaults(fn=cmd_profile_check)
+    s = pp.add_parser("templates", parents=[common], help="list a profile's prompt templates and their slots")
+    s.add_argument("profile")
+    s.set_defaults(fn=cmd_profile_templates)
     s = pp.add_parser("refresh", parents=[common], help="re-fetch schema + pricing and report drift")
     s.add_argument("profile")
     s.set_defaults(fn=cmd_profile_refresh)
@@ -578,11 +673,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_profile_remove)
 
     # run
-    s = sub.add_parser("run", parents=[common], help="generate: validate, price-check, submit, wait, save")
+    s = sub.add_parser("run", parents=[common], help="generate: render template, validate, submit, wait, save")
     tgt = s.add_mutually_exclusive_group(required=True)
     tgt.add_argument("--profile", "-p", help="profile slug, endpoint id, or profile directory")
-    tgt.add_argument("--endpoint", "-e", help="raw endpoint id (no profile)")
-    s.add_argument("--prompt")
+    tgt.add_argument("--endpoint", "-e", help="raw endpoint id (no profile, no researched templates)")
+    s.add_argument("--template", "-t", metavar="NAME", help="a template from the profile's prompting.md, or FILE.md#NAME")
+    s.add_argument("--slot", action="append", metavar="KEY=VALUE", help="a template slot value (repeatable; empty drops it)")
+    s.add_argument("--prompt", help="a finished prompt (instead of --template); goes into the model's prompt field")
     s.add_argument(
         "--set",
         "-s",
@@ -600,12 +697,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="REF",
         help="previous run (last, last~1, run id, dir, manifest) whose outputs auto-fill empty media inputs",
     )
-    s.add_argument("--batch", help="JSONL file; one run per line (merged over other inputs)")
+    s.add_argument("--batch", help='JSONL file; one run per line (merged over other inputs; "$slots": {...} per line)')
     s.add_argument("--concurrency", type=int, default=3)
     s.add_argument("--label", help="short tag added to the run id")
-    s.add_argument("--max-cost", type=float, help="USD limit before asking (default: profile, $FAL_MAX_COST, or 1.00)")
-    s.add_argument("--yes", "-y", action="store_true", help="the user approved the cost; skip the guard")
-    s.add_argument("--dry-run", action="store_true", help="show final arguments + cost; submit nothing")
+    s.add_argument("--max-cost", type=float, help=argparse.SUPPRESS)  # retired in 1.2; accepted and ignored
+    s.add_argument("--yes", "-y", action="store_true", help=argparse.SUPPRESS)  # retired in 1.2
+    s.add_argument("--dry-run", action="store_true", help="show the final arguments and rendered prompt; submit nothing")
     s.add_argument("--no-wait", action="store_true", help="submit and return; finish later with `fetch`")
     s.add_argument("--timeout", type=float, default=1800)
     s.add_argument("--no-download", action="store_true")
@@ -655,7 +752,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_workflow_list)
     for name, fn, helptext in (
         ("show", cmd_workflow_show, "print workflow.json"),
-        ("check", cmd_workflow_check, "validate steps, profiles, scripts; estimate the cost of one run"),
+        ("check", cmd_workflow_check, "validate steps, profiles, templates, scripts"),
         ("plan", cmd_workflow_plan, "the command for each step, with earlier outputs filled in"),
         ("path", cmd_workflow_path, "print the workflow directory"),
     ):
@@ -673,6 +770,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("profile")
     s.add_argument("--dest", default=".claude/skills")
     s.add_argument("--name", help="skill name (default fal-<slug>)")
+    s.add_argument(
+        "--description",
+        help="the skill's trigger description: what the user makes with it and when to use it (default: generic)",
+    )
     s.add_argument("--force", action="store_true")
     s.set_defaults(fn=cmd_export)
 

@@ -1,0 +1,183 @@
+{
+  "endpoint_id": "minimax/h3-max/image-to-video",
+  "category": "image-to-video",
+  "documentation_url": "https://fal.ai/models/minimax/h3-max/image-to-video/api",
+  "playground_url": "https://fal.ai/models/minimax/h3-max/image-to-video",
+  "input": {
+    "type": "object",
+    "x-fal-order-properties": [
+      "prompt",
+      "duration",
+      "resolution",
+      "seed",
+      "enable_safety_checker",
+      "sync_mode",
+      "prompt_expansion_mode",
+      "target_audio_url",
+      "image_url",
+      "end_image_url"
+    ],
+    "required": [
+      "prompt",
+      "prompt_expansion_mode"
+    ],
+    "properties": {
+      "target_audio_url": {
+        "description": "Optional URL of an audio clip at least 2 seconds long (maximum 15 MB) to pin to the generated soundtrack. Longer clips are trimmed to the requested video duration, keeping the beginning. The original audio replaces the output soundtrack, padded with silence if shorter than the video, without changing playback speed. Exceptionally high sample rates may be resampled to 96 kHz. Accepts an HTTP(S) UR…",
+        "type": [
+          "string",
+          "null"
+        ],
+        "minLength": 1,
+        "pattern": "\\S"
+      },
+      "enable_safety_checker": {
+        "type": "boolean",
+        "default": true,
+        "description": "If set to true, the safety checker will be enabled."
+      },
+      "image_url": {
+        "examples": [
+          "https://storage.googleapis.com/falserverless/example_inputs/hailuo23/pro_i2v_in.jpg"
+        ],
+        "description": "Optional URL of the image to use as the first frame. When provided, the output canvas follows this image. If only end_image_url is provided, the canvas follows that last frame instead. If both images are omitted, the request is handled as text-to-video (16:9 by default).",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "duration": {
+        "type": "integer",
+        "maximum": 15,
+        "default": 5,
+        "minimum": 5,
+        "description": "The duration of the video in seconds."
+      },
+      "resolution": {
+        "type": "string",
+        "default": "768P",
+        "enum": [
+          "480P",
+          "768P",
+          "1080P"
+        ],
+        "description": "The native generation resolution, or 1080P latent refinement from a native 768P source."
+      },
+      "end_image_url": {
+        "description": "Optional URL of the image to use as the last frame. It may be provided alone for end-only keyframe generation; in that case the output canvas follows this image.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "prompt": {
+        "type": "string",
+        "examples": [
+          "The camera slowly pulls back from the scene, revealing the full landscape as clouds drift overhead and light shifts across the terrain."
+        ],
+        "minLength": 1,
+        "maxLength": 50000,
+        "description": "Text prompt for video generation"
+      },
+      "sync_mode": {
+        "type": "boolean",
+        "default": false,
+        "description": "Return the generated video as base64 instead of a CDN URL."
+      },
+      "prompt_expansion_mode": {
+        "type": "string",
+        "examples": [
+          "disabled"
+        ],
+        "default": "balanced",
+        "description": "How much effort to spend rewriting the prompt before generation. 'disabled' skips prompt expansion. 'balanced' returns in about a second. 'quality' spends up to ~30s on a richer prompt."
+      },
+      "seed": {
+        "description": "Random seed. A random seed is selected when omitted.",
+        "type": [
+          "integer",
+          "null"
+        ]
+      }
+    }
+  },
+  "output": {
+    "type": "object",
+    "x-fal-order-properties": [
+      "video",
+      "expanded_prompt",
+      "timings"
+    ],
+    "required": [
+      "video"
+    ],
+    "properties": {
+      "video": {
+        "type": "object",
+        "x-fal-order-properties": [
+          "url",
+          "content_type",
+          "file_name",
+          "file_size"
+        ],
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "file_size": {
+            "examples": [
+              4404019
+            ],
+            "description": "The size of the file in bytes.",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "file_name": {
+            "examples": [
+              "z9RV14K95DvU.png"
+            ],
+            "description": "The name of the file. It will be auto-generated if not provided.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "content_type": {
+            "examples": [
+              "image/png"
+            ],
+            "description": "The mime type of the file.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "description": "The URL where the file can be downloaded from."
+          }
+        },
+        "description": "The generated video"
+      },
+      "expanded_prompt": {
+        "description": "The prompt after expansion, as sent to the model. Null when prompt expansion was disabled, left the prompt unchanged, or was performed internally by MiniMax's hosted API.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "timings": {
+        "description": "Timing breakdown in seconds. 'inference' is the DiT denoising time on the GPU backend. Null on routes that do not report backend timings.",
+        "type": [
+          "object",
+          "null"
+        ],
+        "additionalProperties": {
+          "type": "number"
+        }
+      }
+    }
+  }
+}

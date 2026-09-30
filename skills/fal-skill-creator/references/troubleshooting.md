@@ -7,19 +7,30 @@ Start with `fal doctor`. Set `FALKIT_DEBUG=1` to get full tracebacks for unexpec
 | symptom | fix |
 |---|---|
 | `Arguments do not match the model schema: x: 'foo' is not one of [...]` | Use one of the listed values. `fal schema <endpoint>` lists every parameter. |
+| `Template slots without a value: …` | Pass each with `--slot name=value`. The hint lists optional slots, which may be left out. `fal profile templates <slug>` lists all of them. |
+| `Template 'x' has no slot(s) …` | A misspelled or unknown `--slot`. Use the names the hint lists. |
+| `… is a model parameter, not template slots` | Set it with `--set` (e.g. `--set duration=10`); `{=duration}` in the template picks it up. |
+| `(… given empty; required parts can't be left out)` | Give it a value, or, if the part is often not applicable, move it into `[[ … ]]` in the template. |
+| `profile check`: `renders broken text` / `model parameter name(s)` | Put labeled optional parts in `[[ … ]]`; write `{=param}` for a parameter's value or rename the slot. |
+| `warning: slot(s) … are in Japanese…` | Translate those values into the template's language; keep only quoted on-screen text or dialogue as is. |
+| `source doesn't exist (404)` from `profile check` | The guide cites a page that isn't there. Find the real page, or drop the claim. `--offline` skips the fetch. |
+| `price: can't estimate: no price column for quality=auto` | The pricing table has no row for that setting. Pick an explicit value, or add the row from the model page. |
+| `No template 'x' in …/prompting.md` | The hint lists the templates that exist. Add the missing one to prompting.md, or pick another. |
+| `prompting.md isn't ready to be marked researched` | Fix what it lists (`fal profile check <slug>` shows the same report), following prompt-research.md. |
+| `note: … prompting is unresearched` / `no profile` (not an error) | The prompt isn't backed by research. Do SKILL.md A4 before relying on the result. |
+| Export: `isn't researched` / `Workflow isn't ready to export` | Research the named profiles and give every prompted step a `template`, then `workflow check`. |
+| The prompt landed in the wrong field (e.g. a TTS model got `prompt`, not `text`) | `fal profile meta <slug> --prompt-field text`. |
 | `unknown parameter 'x'` (a warning) | Usually a typo. Unknown keys are sent anyway, but fal may ignore them. |
 | `Profile 'x' not found` | `fal profile list`. Profiles are per scope: a project profile lives in `./.fal/profiles`. |
 | `Cannot resolve run reference` / `No run 'label:…'` | `fal runs list`. `last` and `label:` refer to *completed* runs in the current output root (`--out` / `FAL_OUTPUT_DIR`). |
 | `workflow check`: `profile 'x' not found` | Run the `fal profile init …` command it prints, or point the step at another profile. |
-| `workflow plan` shows `<in of step …>` | That step hasn't run in the current pass yet. Run the steps in order; rerunning an early step resets the later ones. |
+| `workflow plan` shows `<in of step …>` or `<slot>` | `<in of step …>`: that step hasn't run in the current pass yet (run the steps in order; rerunning an early step resets the later ones). `<slot>`: fill it from the request (listed under `fill`). |
 | Pinned defaults fail after a model update | `fal profile refresh <slug>`, then fix them with `profile set` / `--unset`. |
 
-## Exit 3: cost guard
+## Exit 3
 
-The estimate is above the limit, or it couldn't be computed and the unit price is above $0.05. For GPU-time pricing
-("compute seconds"), the guard assumes up to 60 s per request, so large batches ask first. Show the user the
-estimate and ask. After they approve, rerun with `--yes`. If the same approval keeps coming up, raise the limit for
-that profile: `fal profile meta <slug> --max-usd 5`.
+Unused since 1.2. It was the cost guard, which was removed: spending is controlled by confirming video, 3D and
+batch runs with the user first (SKILL.md B4). `--yes` and `--max-cost` are accepted and ignored.
 
 ## Exit 4: auth
 

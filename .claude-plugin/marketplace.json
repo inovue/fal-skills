@@ -11,8 +11,8 @@
     {
       "name": "fal",
       "source": "./",
-      "description": "fal-skill-creator: find models with the bundled fal MCP, build schema-validated profiles with researched prompt templates, generate with a cost guard, chain outputs, and package multi-model workflows as skills.",
-      "version": "1.2.0",
+      "description": "fal-skill-creator: researched prompt templates and input rules for any fal.ai model, templated generation, chainable outputs, and multi-model workflows exported as skills.",
+      "version": "1.2.1",
       "category": "media",
       "keywords": [
         "fal",
