@@ -268,7 +268,7 @@ the sheet into one transparent PNG per asset.
 
 - Outputs go to `./fal-outputs/` by default (override with `--out` or `$FAL_OUTPUT_DIR`). Media can be large;
   suggest adding `fal-outputs/` to `.gitignore` when working inside a git repo.
-- The API key comes from `FAL_KEY`, or from bws (`BWS_ACCESS_TOKEN` plus a secret named `FAL_KEY`, or set
+- The API key comes from `FAL_KEY`, or from bws (`BWS_ACCESS_TOKEN` or `BWS_ACCESS_TOKEN_FILE`, plus a secret named `FAL_KEY`, or set
   `FAL_BWS_SECRET_ID`). The runtime never prints the key, never passes it as a command-line argument, and never
   writes it to disk. Don't echo it, write it into files, or paste it into commands yourself, and don't run
   `scripts/mcp_headers.py` (an optional MCP auth helper that prints the key). `fal doctor` confirms where the key

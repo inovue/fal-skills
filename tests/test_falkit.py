@@ -41,7 +41,7 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.delenv("FAL_PROFILES_DIR", raising=False)
     monkeypatch.delenv("FAL_MAX_COST", raising=False)
     if not os.environ.get("FAL_LIVE"):  # offline means offline, even on a machine that has a key
-        for v in ("FAL_KEY", "FAL_KEY_ID", "FAL_KEY_SECRET", "BWS_ACCESS_TOKEN"):
+        for v in ("FAL_KEY", "FAL_KEY_ID", "FAL_KEY_SECRET", "BWS_ACCESS_TOKEN", "BWS_ACCESS_TOKEN_FILE"):
             monkeypatch.delenv(v, raising=False)
     monkeypatch.chdir(tmp_path)
 
@@ -250,11 +250,60 @@ def test_missing_key_is_auth_error(monkeypatch):
     from falkit import auth as core
 
     monkeypatch.setattr(core, "_key_cache", None)
-    for v in ("FAL_KEY", "FAL_KEY_ID", "FAL_KEY_SECRET", "BWS_ACCESS_TOKEN"):
+    for v in ("FAL_KEY", "FAL_KEY_ID", "FAL_KEY_SECRET", "BWS_ACCESS_TOKEN", "BWS_ACCESS_TOKEN_FILE"):
         monkeypatch.delenv(v, raising=False)
     with pytest.raises(FalkitError) as e:
         core.resolve_key()
     assert e.value.code == core.EXIT_AUTH
+
+
+def _fake_bws(tmp_path, monkeypatch, token: str) -> None:
+    """Put a `bws` on PATH that answers `secret list` only for the expected token."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "bws"
+    fake.write_text(
+        "#!/bin/sh\n"
+        f'[ "$BWS_ACCESS_TOKEN" = "{token}" ] || {{ echo "bad token" >&2; exit 1; }}\n'
+        """echo '[{"id": "0123456789abcdef", "key": "FAL_KEY", "value": "k-from-bws"}]'\n"""
+    )
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+
+
+def test_bws_token_file(tmp_path, monkeypatch):
+    from falkit import auth as core
+
+    monkeypatch.setattr(core, "_key_cache", None)
+    _fake_bws(tmp_path, monkeypatch, "tok-123")
+    token_file = tmp_path / "bws-token"
+    token_file.write_text("tok-123\n")
+    monkeypatch.setenv("BWS_ACCESS_TOKEN_FILE", str(token_file))
+
+    assert core.resolve_key() == "k-from-bws"
+    assert core.key_source().startswith("bws secret 'FAL_KEY'")
+    assert "BWS_ACCESS_TOKEN" not in os.environ  # handed to the bws subprocess only
+
+
+def test_bws_token_env_wins_over_file(tmp_path, monkeypatch):
+    from falkit import auth as core
+
+    monkeypatch.setattr(core, "_key_cache", None)
+    _fake_bws(tmp_path, monkeypatch, "tok-env")
+    monkeypatch.setenv("BWS_ACCESS_TOKEN", "tok-env")
+    monkeypatch.setenv("BWS_ACCESS_TOKEN_FILE", str(tmp_path / "does-not-exist"))
+    assert core.resolve_key() == "k-from-bws"
+
+
+def test_bws_token_file_unreadable_is_auth_error(tmp_path, monkeypatch):
+    from falkit import auth as core
+
+    monkeypatch.setattr(core, "_key_cache", None)
+    _fake_bws(tmp_path, monkeypatch, "tok-123")
+    monkeypatch.setenv("BWS_ACCESS_TOKEN_FILE", str(tmp_path / "missing"))
+    with pytest.raises(FalkitError) as e:
+        core.resolve_key()
+    assert e.value.code == core.EXIT_AUTH and "BWS_ACCESS_TOKEN_FILE" in str(e.value)
 
 
 # --- CLI end-to-end (offline, via --mock) ----------------------------------
@@ -286,7 +335,7 @@ def test_cli_profile_from_fixture_and_mock_run(tmp_path, flux):
     img.write_bytes(b"png")
     mock = tmp_path / "mock.json"
     mock.write_text(json.dumps({"images": [{"url": img.as_uri(), "content_type": "image/png"}], "seed": 3}))
-    env = {"FAL_KEY": "", "BWS_ACCESS_TOKEN": "", "FAL_OUTPUT_DIR": str(tmp_path / "out")}
+    env = {"FAL_KEY": "", "BWS_ACCESS_TOKEN": "", "BWS_ACCESS_TOKEN_FILE": "", "FAL_OUTPUT_DIR": str(tmp_path / "out")}
 
     r = _cli("profile", "list", "--json", env=env)
     assert r.returncode == 0, r.stderr

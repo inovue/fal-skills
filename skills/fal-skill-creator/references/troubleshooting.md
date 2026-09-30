@@ -25,6 +25,7 @@ that profile: `fal profile meta <slug> --max-usd 5`.
 
 - `No fal API key found`: see `references/auth.md`.
 - `fal rejected the API key (401)`: the key was revoked or mistyped. Check the fal dashboard.
+- `cannot read BWS_ACCESS_TOKEN_FILE`: the path is wrong or not readable; it must hold only the token.
 - `bws … failed`: the `BWS_ACCESS_TOKEN` expired, or the machine account lacks access to the project.
 
 ## Exit 5: fal API error
