@@ -419,7 +419,7 @@ def test_bws_token_file_unreadable_is_auth_error(tmp_path, monkeypatch):
     from falkit import auth as core
 
     monkeypatch.setattr(core, "_key_cache", None)
-    _fake_bws(tmp_path, monkeypatch, "tok-123")
+    monkeypatch.setattr(core.shutil, "which", lambda name: "bws")  # the file is read before bws ever runs
     monkeypatch.setenv("BWS_ACCESS_TOKEN_FILE", str(tmp_path / "missing"))
     with pytest.raises(FalkitError) as e:
         core.resolve_key()
