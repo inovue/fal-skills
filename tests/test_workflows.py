@@ -30,7 +30,7 @@ from falkit.core import FalkitError  # noqa: E402
 def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("FAL_SKILLS_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
-    for v in ("FAL_PROFILES_DIR", "FAL_KEY", "FAL_KEY_ID", "FAL_KEY_SECRET", "BWS_ACCESS_TOKEN"):
+    for v in ("FAL_PROFILES_DIR", "FAL_KEY", "FAL_KEY_ID", "FAL_KEY_SECRET", "BWS_ACCESS_TOKEN", "BWS_ACCESS_TOKEN_FILE"):
         monkeypatch.delenv(v, raising=False)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(profiles, "url_status", lambda url: 200)  # source checks stay offline
@@ -357,7 +357,7 @@ def test_split_sprites_staggered_layout_without_clean_gaps(tmp_path):
 
 # --- MCP headers helper -------------------------------------------------------------------
 def _headers(env: dict) -> subprocess.CompletedProcess:
-    clean = {k: v for k, v in os.environ.items() if k not in {"FAL_KEY", "FAL_KEY_ID", "FAL_KEY_SECRET", "BWS_ACCESS_TOKEN"}}
+    clean = {k: v for k, v in os.environ.items() if k not in {"FAL_KEY", "FAL_KEY_ID", "FAL_KEY_SECRET", "BWS_ACCESS_TOKEN", "BWS_ACCESS_TOKEN_FILE"}}
     return subprocess.run(
         [sys.executable, str(SCRIPTS / "mcp_headers.py")], capture_output=True, text=True, env={**clean, **env}, encoding="utf-8", errors="replace")
 

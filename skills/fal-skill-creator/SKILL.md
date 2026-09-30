@@ -4,7 +4,7 @@ description: Get the best out of fal.ai models, and build workflows and skills a
 license: MIT
 compatibility: Python 3.10+ via uv (recommended) or pip. Network access to fal.ai. A fal API key in FAL_KEY or in Bitwarden Secrets Manager (bws). The fal MCP server is optional and comes with the Claude Code plugin. Works in any agent that can run shell commands.
 metadata:
-  version: 1.2.0
+  version: 1.2.1
   homepage: https://github.com/inovue/fal-skills
 ---
 
@@ -258,8 +258,8 @@ subjective choices are `review` steps; build a workflow only for something the u
   rule are the safeguards. Every run prints `price: ≈ $…` from the guide's researched table, and the manifest keeps
   it (`price_estimate`); quote that, with its basis, and the date the prices were checked. Without a table, only the
   API's unit price is known: say so, and say when it can't be known in advance (GPU time, token billing).
-- The API key comes from `FAL_KEY` or bws (`BWS_ACCESS_TOKEN` plus a secret named `FAL_KEY`, or
-  `FAL_BWS_SECRET_ID`). The runtime never prints it, passes it as an argument, or writes it to disk. Don't echo it,
+- The API key comes from `FAL_KEY` or bws (`BWS_ACCESS_TOKEN`, or the file named by `BWS_ACCESS_TOKEN_FILE`, plus a
+  secret named `FAL_KEY`, or `FAL_BWS_SECRET_ID`). The runtime never prints it, passes it as an argument, or writes it to disk. Don't echo it,
   write it into files, or paste it into commands, and don't run `scripts/mcp_headers.py` (it prints the key).
 - Uploads and outputs are stored on fal's CDN at unguessable but public URLs. Upload (`@path`) only files the user
   pointed you to, and ask before uploading anything that looks private (faces of real people, documents).

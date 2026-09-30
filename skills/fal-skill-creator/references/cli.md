@@ -126,7 +126,7 @@ examples trimmed. `x-fal-order-properties` keeps fal's display order.
 | variable | default | purpose |
 |---|---|---|
 | `FAL_KEY` / `FAL_KEY_ID`+`FAL_KEY_SECRET` | — | API key (see auth.md) |
-| `BWS_ACCESS_TOKEN`, `FAL_BWS_SECRET_ID`, `FAL_BWS_SECRET_NAME`, `BWS_PROJECT_ID` | —, —, `FAL_KEY`, — | Bitwarden lookup |
+| `BWS_ACCESS_TOKEN` or `BWS_ACCESS_TOKEN_FILE`, `FAL_BWS_SECRET_ID`, `FAL_BWS_SECRET_NAME`, `BWS_PROJECT_ID` | —, —, `FAL_KEY`, — | Bitwarden lookup (the `_FILE` form keeps the token out of process environments) |
 | `FAL_OUTPUT_DIR` | `./fal-outputs` | output root |
 | `FAL_SKILLS_HOME` | `~/.fal-skills` | user profiles and workflows live in `$FAL_SKILLS_HOME/profiles` and `/workflows` |
 | `FAL_PROFILES_DIR` | — | use only this profiles directory (disables the project/user lookup; an exported workflow skill's bundled profiles still come first) |

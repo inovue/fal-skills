@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import time
+from pathlib import Path
 from typing import Any
 
 from .errors import EXIT_AUTH, FalkitError
@@ -24,7 +25,30 @@ _key_cache: tuple[str, str] | None = None
 _BWS_TRANSIENT = re.compile(r"\[(?:429|5\d\d)\b|timed? ?out|connection (?:reset|refused|error)|disconnect", re.I)
 
 
-def _bws_json(args: list[str], timeout: float = 60, attempts: int = 3) -> Any:
+def _bws_token() -> str | None:
+    """BWS_ACCESS_TOKEN, else the contents of the file named by BWS_ACCESS_TOKEN_FILE.
+
+    The file form keeps the token out of every process environment: it is read
+    here and handed only to the bws subprocess.
+    """
+    token = os.environ.get("BWS_ACCESS_TOKEN", "").strip()
+    if token:
+        return token
+    path = os.environ.get("BWS_ACCESS_TOKEN_FILE", "").strip()
+    if not path:
+        return None
+    try:
+        token = Path(path).expanduser().read_text(encoding="utf-8").strip()
+    except OSError as e:
+        raise FalkitError(
+            f"cannot read BWS_ACCESS_TOKEN_FILE ({type(e).__name__})",
+            EXIT_AUTH,
+            hint="Point BWS_ACCESS_TOKEN_FILE at a file that holds only the machine account token.",
+        ) from e
+    return token or None
+
+
+def _bws_json(args: list[str], token: str, timeout: float = 60, attempts: int = 3) -> Any:
     for attempt in range(attempts):
         try:
             proc = subprocess.run(
@@ -32,7 +56,7 @@ def _bws_json(args: list[str], timeout: float = 60, attempts: int = 3) -> Any:
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                env=os.environ.copy(),
+                env={**os.environ, "BWS_ACCESS_TOKEN": token},
                 encoding="utf-8",
                 errors="replace",
             )
@@ -46,23 +70,26 @@ def _bws_json(args: list[str], timeout: float = 60, attempts: int = 3) -> Any:
         raise FalkitError(
             f"bws {' '.join(args[:2])} failed: {proc.stderr.strip()[:300]}",
             EXIT_AUTH,
-            hint="Check BWS_ACCESS_TOKEN and that the machine account can read the secret.",
+            hint="Check BWS_ACCESS_TOKEN (or BWS_ACCESS_TOKEN_FILE) and that the machine account can read the secret.",
         )
     return json.loads(proc.stdout)
 
 
 def _key_from_bws(timeout: float = 60) -> tuple[str, str] | None:
-    if not shutil.which("bws") or not os.environ.get("BWS_ACCESS_TOKEN"):
+    if not shutil.which("bws"):
+        return None
+    token = _bws_token()
+    if not token:
         return None
     secret_id = os.environ.get("FAL_BWS_SECRET_ID")
     if secret_id:
-        data = _bws_json(["secret", "get", secret_id], timeout)
+        data = _bws_json(["secret", "get", secret_id], token, timeout)
         return data["value"].strip(), f"bws secret id {secret_id[:8]}…"
     name = os.environ.get("FAL_BWS_SECRET_NAME", "FAL_KEY")
     list_args = ["secret", "list"]
     if os.environ.get("BWS_PROJECT_ID"):
         list_args.append(os.environ["BWS_PROJECT_ID"])
-    matches = [s for s in _bws_json(list_args, timeout) if s.get("key") == name]
+    matches = [s for s in _bws_json(list_args, token, timeout) if s.get("key") == name]
     if not matches:
         return None
     if len(matches) > 1:
@@ -92,8 +119,8 @@ def resolve_key(required: bool = True, bws_timeout: float = 60) -> str | None:
             raise FalkitError(
                 "No fal API key found",
                 EXIT_AUTH,
-                hint="Set FAL_KEY, or set BWS_ACCESS_TOKEN with a bws secret named FAL_KEY "
-                "(or FAL_BWS_SECRET_ID). See references/auth.md.",
+                hint="Set FAL_KEY, or set BWS_ACCESS_TOKEN (or BWS_ACCESS_TOKEN_FILE) with a bws secret "
+                "named FAL_KEY (or FAL_BWS_SECRET_ID). See references/auth.md.",
             )
         return None
     _key_cache = found

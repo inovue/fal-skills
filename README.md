@@ -94,7 +94,8 @@ needs to leave it:
 
 ```bash
 bws secret create FAL_KEY "<your fal key>" <project_id>    # once
-export BWS_ACCESS_TOKEN="…"      # must be set in the shell that starts Claude Code
+export BWS_ACCESS_TOKEN_FILE=~/.config/bws/token   # a file holding only the token (chmod 600), or:
+# export BWS_ACCESS_TOKEN="…"   # the token itself; every process started from this shell can read it
 export FAL_BWS_SECRET_ID="…"     # optional: the secret's id, a faster lookup (needed if two secrets are named FAL_KEY)
 ```
 

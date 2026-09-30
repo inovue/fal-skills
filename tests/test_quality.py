@@ -33,7 +33,7 @@ FIXTURES = {json.loads(p.read_text(encoding="utf-8"))["endpoint_id"]: p for p in
 def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("FAL_SKILLS_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
-    for v in ("FAL_PROFILES_DIR", "FAL_KEY", "FAL_KEY_ID", "FAL_KEY_SECRET", "BWS_ACCESS_TOKEN"):
+    for v in ("FAL_PROFILES_DIR", "FAL_KEY", "FAL_KEY_ID", "FAL_KEY_SECRET", "BWS_ACCESS_TOKEN", "BWS_ACCESS_TOKEN_FILE"):
         monkeypatch.delenv(v, raising=False)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(profiles, "url_status", lambda url: 200)
@@ -250,7 +250,7 @@ def test_validated_with_must_be_a_templated_run_of_this_profile(tmp_path):
     Image.new("RGB", (8, 8)).save(img)
     mock = tmp_path / "mock.json"
     mock.write_text(json.dumps({"images": [{"url": img.as_uri(), "content_type": "image/png"}]}), encoding="utf-8")
-    env = {"FAL_KEY": "", "BWS_ACCESS_TOKEN": "", "FAL_OUTPUT_DIR": str(tmp_path / "out"),
+    env = {"FAL_KEY": "", "BWS_ACCESS_TOKEN": "", "BWS_ACCESS_TOKEN_FILE": "", "FAL_OUTPUT_DIR": str(tmp_path / "out"),
            "FAL_SKILLS_HOME": str(tmp_path / "home"), "XDG_CACHE_HOME": str(tmp_path / "cache")}
     r = _cli("run", "-p", "gpt-image", "--prompt", "a fox", "--mock", str(mock), "--label", "plain", env=env)
     assert r.returncode == 0, r.stderr

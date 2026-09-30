@@ -4,7 +4,9 @@ The runtime looks for a key in this order and uses the first one it finds:
 
 1. `FAL_KEY` environment variable.
 2. `FAL_KEY_ID` + `FAL_KEY_SECRET`, joined as `id:secret`.
-3. **Bitwarden Secrets Manager** (`bws` CLI), when `bws` is on PATH and `BWS_ACCESS_TOKEN` is set:
+3. **Bitwarden Secrets Manager** (`bws` CLI), when `bws` is on PATH and a machine account token is available from
+   `BWS_ACCESS_TOKEN`, or from the file named by `BWS_ACCESS_TOKEN_FILE` (read only when needed and passed to the
+   `bws` process alone):
    - If `FAL_BWS_SECRET_ID` is set, that secret is read (`bws secret get <id>`). This is the fastest and least
      ambiguous option.
    - Otherwise, the secret whose key equals `FAL_BWS_SECRET_NAME` (default `FAL_KEY`) is used from
@@ -28,7 +30,8 @@ export FAL_KEY="…"            # add to your shell profile or a direnv .envrc (
 **Bitwarden Secrets Manager** (recommended for teams and CI):
 ```bash
 bws secret create FAL_KEY "<key>" <project_id>
-export BWS_ACCESS_TOKEN="<machine account token>"
+export BWS_ACCESS_TOKEN_FILE=~/.config/bws/token   # file holding only the token, chmod 600 (preferred)
+# or: export BWS_ACCESS_TOKEN="<machine account token>"
 # optional, faster:
 export FAL_BWS_SECRET_ID="<secret uuid>"
 ```

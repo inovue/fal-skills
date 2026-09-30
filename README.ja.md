@@ -68,7 +68,8 @@ npx skills add inovue/fal-skills
 
 ```bash
 bws secret create FAL_KEY "<fal のキー>" <project_id>    # 最初に1回だけ
-export BWS_ACCESS_TOKEN="…"      # Claude Code を起動するシェルに設定しておく
+export BWS_ACCESS_TOKEN_FILE=~/.config/bws/token   # トークンだけを書いたファイル（chmod 600）。または:
+# export BWS_ACCESS_TOKEN="…"   # トークンそのもの。このシェルから起動した全プロセスから見える
 export FAL_BWS_SECRET_ID="…"     # 任意：シークレットの ID。検索が速くなる（FAL_KEY という名前が2つある場合は必須）
 ```
 

@@ -12,7 +12,7 @@
       "name": "fal",
       "source": "./",
       "description": "fal-skill-creator: researched prompt templates and input rules for any fal.ai model, templated generation, chainable outputs, and multi-model workflows exported as skills.",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "category": "media",
       "keywords": [
         "fal",
