@@ -190,6 +190,15 @@ make test-live   # plus one real flux/schnell call (~$0.003)
 make lint validate
 ```
 
+To test the working copy on your own machine as the real skill, disable the installed plugin and link this checkout
+into the global skills directory (edits are live; a new session re-reads `SKILL.md`):
+
+```bash
+claude plugin disable fal@fal-skills
+make link          # ~/.claude/skills/fal-skill-creator -> ./skills/fal-skill-creator
+make unlink        # then: claude plugin enable fal@fal-skills
+```
+
 Contributions are welcome, especially bundled workflow examples, media-kind heuristics for unusual input names,
 prompt-field names for models that don't use `prompt`, and fixes where a model's schema breaks compaction (please
 attach the endpoint id).
